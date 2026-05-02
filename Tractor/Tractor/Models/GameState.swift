@@ -89,6 +89,9 @@ class GameState: ObservableObject {
     @Published var teamLevels: [Int: Rank] = [0: .two, 1: .two]
     @Published var dealerTeamIdx: Int = 0
 
+    /// 上一局的庄家位置（用于在同队内轮换庄家）
+    @Published var lastDealerPosition: PlayerPosition = .south
+
     // 历史墩
     @Published var completedTricks: [Trick] = []
 

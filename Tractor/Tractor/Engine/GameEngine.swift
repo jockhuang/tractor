@@ -58,8 +58,9 @@ class GameEngine: ObservableObject {
         state.phase     = .dealing
         state.trumpRank = state.currentDealerTeamLevel
 
-        // 确定庄家
-        let dealerPos: PlayerPosition = state.dealerTeamIdx == 0 ? .south : .west
+        // 确定庄家：在上一局庄家的同队队友之间轮换
+        let dealerPos = nextDealerPosition(dealerTeamIdx: state.dealerTeamIdx,
+                                           lastDealer: state.lastDealerPosition)
         setDealer(dealerPos)
 
         state.message = "正在发牌，可亮主..."
@@ -257,7 +258,7 @@ class GameEngine: ObservableObject {
     }
 
     /// 应用亮主声明
-    /// 注意：亮主只更新主花色，不改变庄家位置（庄家由每局开始时确定）
+    /// 亮主更新主花色，并将庄家设为亮主玩家（标准拖拉机规则：谁亮主谁坐庄）
     private func applyDeclaration(position: PlayerPosition, suit: Suit, strength: Int) {
         state.trumpSuit = suit
         state.trumpDeclaration = TrumpDeclaration(
@@ -265,8 +266,10 @@ class GameEngine: ObservableObject {
             suit: suit,
             strength: strength
         )
+        // 亮主者成为本局庄家
+        setDealer(position)
         let badge = strength == 2 ? "（对子）" : "（单张）"
-        state.message = "\(position.displayName) 亮主：\(suit.rawValue)\(state.trumpRank.display) \(badge)"
+        state.message = "\(position.displayName) 亮主坐庄：\(suit.rawValue)\(state.trumpRank.display) \(badge)"
         syncMultiplayerState()
     }
 
@@ -400,13 +403,20 @@ class GameEngine: ObservableObject {
         }
 
         if !state.currentTrick.plays.isEmpty {
-            // 甩牌失败强制出牌校验
+            // 甩牌失败强制出牌校验：若人类选牌未包含强制牌，自动替换为强制牌+最弱补牌
             if let forced = state.forcedFollowCards[position], !forced.isEmpty {
-                let forcedIDs  = Set(forced.map { $0.id })
+                let forcedIDs   = Set(forced.map { $0.id })
                 let selectedIDs = Set(selected.map { $0.id })
-                guard forcedIDs.isSubset(of: selectedIDs) else {
-                    state.message = "甩牌失败，你必须出：\(forced.map { $0.shortDisplay }.joined(separator: " "))"
+                if !forcedIDs.isSubset(of: selectedIDs) {
+                    // 回退人类选的牌，改成强制牌 + 最弱补牌
+                    let autoCards = buildForcedPlay(
+                        forced: forced,
+                        hand: player.hand,
+                        count: leadCount
+                    )
+                    state.message = "甩牌失败，强制出：\(forced.map { $0.shortDisplay }.joined(separator: " "))"
                     syncMultiplayerState()
+                    performPlay(position: position, cards: autoCards)
                     return
                 }
             }
@@ -432,8 +442,15 @@ class GameEngine: ObservableObject {
         state.message = "\(position.displayName) 出了 \(cards.map { $0.shortDisplay }.joined(separator: " "))"
 
         // 首张：检测甩牌，更新强制出牌和罚分
+        // 若是人类甩牌失败，需回退出牌并让人类重新选择
         if state.currentTrick.plays.count == 1 {
-            analyzeSlamLead(position: position, cards: cards)
+            if humanControlledPositions.contains(position) {
+                if revertSlamIfFailed(position: position, cards: cards) {
+                    return   // 已回退，等待人类重新出牌
+                }
+            } else {
+                analyzeSlamLead(position: position, cards: cards)
+            }
         }
 
         syncMultiplayerState()
@@ -525,6 +542,9 @@ class GameEngine: ObservableObject {
             attackAdvance: attackAdvance
         )
 
+        // 记录本局庄家（用于下局庄家轮换）
+        state.lastDealerPosition = state.dealerPosition
+
         if attackWon {
             advanceLevel(team: state.attackTeamIdx, steps: attackAdvance)
             state.dealerTeamIdx = state.attackTeamIdx
@@ -565,6 +585,76 @@ class GameEngine: ObservableObject {
     }
 
     // MARK: - 甩牌分析
+
+    /// 若人类先手甩牌失败，回退出牌，重置到出牌前状态，返回 true 表示已回退
+    private func revertSlamIfFailed(position: PlayerPosition, cards: [Card]) -> Bool {
+        let evaluator = makeEvaluator()
+        guard let slam = evaluator.slamInfo(of: cards) else {
+            // 不是甩牌，正常走后续流程
+            analyzeSlamLead(position: position, cards: cards)
+            return false
+        }
+
+        // 先对所有对手的手牌做检测
+        let opponents = PlayerPosition.allCases.filter { $0 != position }
+        var opponentHands: [PlayerPosition: [Card]] = [:]
+        for pos in opponents {
+            opponentHands[pos] = state.player(pos).hand
+        }
+        let penalty = evaluator.slamPenaltyPoints(slam: slam, opponentHands: opponentHands)
+
+        if penalty == 0 {
+            // 甩牌成功，继续正常流程（设置强制跟牌）
+            analyzeSlamLead(position: position, cards: cards)
+            return false
+        }
+
+        // 甩牌失败：回退人类的出牌
+        state.currentTrick.plays.removeLast()
+        state.player(position).hand.append(contentsOf: cards)
+        state.player(position).sortHand(trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
+
+        // 扣分
+        if position.team == state.attackTeamIdx {
+            state.attackScore = max(0, state.attackScore - penalty)
+        } else {
+            state.attackScore += penalty
+        }
+
+        // 显示哪些对手有更大的牌
+        var forcedParts: [String] = []
+        for pos in opponents {
+            let forcing = evaluator.slamForcing(slam: slam, opponentHand: opponentHands[pos]!)
+            if !forcing.isEmpty {
+                let display = forcing.resolvedForcedCards.map { $0.shortDisplay }.joined(separator: " ")
+                forcedParts.append("\(pos.displayName)有[\(display)]")
+            }
+        }
+        state.message = "甩牌失败 -\(penalty)分（\(forcedParts.joined(separator: "，"))），请重新出牌"
+        syncMultiplayerState()
+        return true
+    }
+
+    /// 构建强制出牌：forced 牌 + 从手牌中取最弱补牌，总张数 = count
+    private func buildForcedPlay(forced: [Card], hand: [Card], count: Int) -> [Card] {
+        var result = Array(forced.prefix(count))
+        if result.count < count {
+            let usedIDs = Set(result.map { $0.id })
+            let rest = hand.filter { !usedIDs.contains($0.id) }
+            let ts = state.trumpSuit
+            let tr = state.trumpRank
+            let fill = rest.sorted { a, b in
+                // 垫牌顺序：非主优先，分值低优先，rank 小优先
+                let aTrump = CardComparator.isTrump(a, trumpSuit: ts, trumpRank: tr)
+                let bTrump = CardComparator.isTrump(b, trumpSuit: ts, trumpRank: tr)
+                if aTrump != bTrump { return !aTrump }
+                if a.pointValue != b.pointValue { return a.pointValue < b.pointValue }
+                return a.rank.rawValue < b.rank.rawValue
+            }
+            result += Array(fill.prefix(count - result.count))
+        }
+        return Array(result.prefix(count))
+    }
 
     /// 检测领出的牌是否为甩牌，若是则计算罚分并设置各家的强制出牌
     private func analyzeSlamLead(position: PlayerPosition, cards: [Card]) {
@@ -717,5 +807,21 @@ class GameEngine: ObservableObject {
     private func nextPosition(after pos: PlayerPosition) -> PlayerPosition {
         let order: [PlayerPosition] = [.south, .west, .north, .east]
         return order[(order.firstIndex(of: pos)! + 1) % 4]
+    }
+
+    /// 根据庄家队伍和上一局庄家位置，计算本局初始庄家（同队内轮换）
+    private func nextDealerPosition(dealerTeamIdx: Int, lastDealer: PlayerPosition) -> PlayerPosition {
+        // team 0: south(.rawValue=0) <-> north(.rawValue=2)
+        // team 1: west(.rawValue=1)  <-> east(.rawValue=3)
+        let teamPairs: [Int: [PlayerPosition]] = [
+            0: [.south, .north],
+            1: [.west,  .east]
+        ]
+        let candidates = teamPairs[dealerTeamIdx] ?? [.south]
+        // 如果上一局庄家属于本队，轮换到另一个队友；否则默认第一个
+        if let idx = candidates.firstIndex(of: lastDealer) {
+            return candidates[(idx + 1) % candidates.count]
+        }
+        return candidates[0]
     }
 }
