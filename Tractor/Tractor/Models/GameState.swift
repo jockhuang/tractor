@@ -15,8 +15,9 @@ enum GamePhase: Equatable, Codable {
 // MARK: - Trump Declaration
 struct TrumpDeclaration: Equatable, Codable {
     var declarer: PlayerPosition
-    var suit: Suit
-    var strength: Int        // 1 = 单张, 2 = 对子
+    var suit: Suit?          // nil = 无主（王牌反主）
+    var strength: Int
+    // strength: 1=单张级牌, 2=对子级牌, 3=王牌对(无主，大小王均可)
 }
 
 // MARK: - Trick（一墩）
@@ -89,8 +90,14 @@ class GameState: ObservableObject {
     @Published var teamLevels: [Int: Rank] = [0: .two, 1: .two]
     @Published var dealerTeamIdx: Int = 0
 
-    /// 上一局的庄家位置（用于在同队内轮换庄家）
-    @Published var lastDealerPosition: PlayerPosition = .south
+    /// 攻方胜后，下局指定庄家位置（顺时针轮转）
+    var pendingDealerPosition: PlayerPosition? = nil
+
+    /// 当前局数（从 1 开始，第 1 局亮主可改变庄家）
+    var roundNumber: Int = 0
+
+    /// 发牌结束后的思考倒计时（秒），0 表示不在倒计时
+    @Published var postDealCountdown: Int = 0
 
     // 历史墩
     @Published var completedTricks: [Trick] = []
@@ -127,7 +134,8 @@ class GameState: ObservableObject {
         trumpDeclaration  = nil
         dealtCount        = 0
         isDealingFast     = false
-        forcedFollowCards = [:]
+        forcedFollowCards   = [:]
+        postDealCountdown   = 0
         for p in players { p.hand = []; p.isDealer = false }
     }
 }

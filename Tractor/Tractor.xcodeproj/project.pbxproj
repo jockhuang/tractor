@@ -27,6 +27,7 @@
 		50DDA9FB6CFEFD5588916417 /* GameBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C98CB540074BC5E848216557 /* GameBoardView.swift */; };
 		F7B235559E4A7603B1BBD6F2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 671E5B54412D9F8033A8454C /* Assets.xcassets */; };
 		B95FF48B976B4685DF6ED2F6 /* DealingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCE6FDA953C788095A46F543 /* DealingView.swift */; };
+		A1B2C3D4E5F6A7B8C9D0E1F2 /* TrickHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6A7B8C9D0E1F2A3 /* TrickHistoryView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -52,6 +53,7 @@
 		0A929019CD960CE95E5D54A9 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A97C29AD63741CF438998CE6 /* Tractor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Tractor.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		BCE6FDA953C788095A46F543 /* DealingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DealingView.swift; sourceTree = "<group>"; };
+		B2C3D4E5F6A7B8C9D0E1F2A3 /* TrickHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrickHistoryView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -137,6 +139,7 @@
 				0F3D41A45212AAAC70FAB15C /* MenuView.swift */,
 				C98CB540074BC5E848216557 /* GameBoardView.swift */,
 				BCE6FDA953C788095A46F543 /* DealingView.swift */,
+				B2C3D4E5F6A7B8C9D0E1F2A3 /* TrickHistoryView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -230,6 +233,7 @@
 				A082732A9607D6F915C0FFD2 /* MenuView.swift in Sources */,
 				50DDA9FB6CFEFD5588916417 /* GameBoardView.swift in Sources */,
 				B95FF48B976B4685DF6ED2F6 /* DealingView.swift in Sources */,
+				A1B2C3D4E5F6A7B8C9D0E1F2 /* TrickHistoryView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

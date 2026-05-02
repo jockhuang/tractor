@@ -16,8 +16,10 @@ struct DealingOverlayView: View {
         return d
     }
 
-    /// 手中大小王数量（用于"无主"声明）
-    private var jokerCount: Int {
+    private var smallJokerCount: Int {
+        engine.localPlayer.hand.filter { $0.rank == .smallJoker }.count
+    }
+    private var bigJokerCount: Int {
         engine.localPlayer.hand.filter { $0.rank == .bigJoker }.count
     }
 
@@ -40,12 +42,23 @@ struct DealingOverlayView: View {
 
             Spacer()
 
-            // ── 五个常驻按钮（4花色 + 无主）──────────────
+            // ── 亮主按钮（4花色 + 无主）──────────────
             HStack(spacing: 8) {
                 ForEach(Suit.allCases, id: \.self) { suit in
                     suitButton(suit: suit)
                 }
                 noTrumpButton
+            }
+
+            // ── 倒计时（发牌结束后思考时间）─────────────
+            if state.postDealCountdown > 0 {
+                Text("\(state.postDealCountdown)")
+                    .font(.system(size: 15, weight: .bold, design: .monospaced))
+                    .foregroundColor(state.postDealCountdown <= 3 ? .red : .yellow)
+                    .frame(width: 28, height: 28)
+                    .background(Color.black.opacity(0.4))
+                    .clipShape(Circle())
+                    .overlay(Circle().strokeBorder(Color.yellow.opacity(0.5), lineWidth: 1))
             }
 
             // ── 快速发牌 ───────────────────────────────
@@ -87,14 +100,20 @@ struct DealingOverlayView: View {
         Group {
             if let decl = state.trumpDeclaration {
                 HStack(spacing: 4) {
-                    Text(decl.suit.rawValue)
-                        .font(.system(size: 15))
-                        .foregroundColor(decl.suit.color == "red" ? .red : .white)
+                    if let suit = decl.suit {
+                        Text(suit.rawValue)
+                            .font(.system(size: 15))
+                            .foregroundColor(suit.color == "red" ? .red : .white)
+                    } else {
+                        // 无主：显示王牌图标
+                        Text(decl.strength == 4 ? "🃏" : "🂿")
+                            .font(.system(size: 14))
+                    }
                     VStack(alignment: .leading, spacing: 0) {
                         Text(decl.declarer.displayName)
                             .font(.system(size: 9))
                             .foregroundColor(.white.opacity(0.6))
-                        Text(decl.strength == 2 ? "对子" : "单张")
+                        Text(badgeLabel(decl.strength))
                             .font(.system(size: 10, weight: .bold))
                             .foregroundColor(.yellow)
                     }
@@ -112,6 +131,15 @@ struct DealingOverlayView: View {
                     .background(Color.white.opacity(0.06))
                     .clipShape(RoundedRectangle(cornerRadius: 6))
             }
+        }
+    }
+
+    private func badgeLabel(_ strength: Int) -> String {
+        switch strength {
+        case 1: return "单张"
+        case 2: return "对子"
+        case 3: return "王牌·无主"
+        default: return ""
         }
     }
 
@@ -169,16 +197,18 @@ struct DealingOverlayView: View {
         .disabled(!canUse)
     }
 
-    // MARK: - 无主按钮（需要 2 张大王）
+    // MARK: - 无主按钮（小王对或大王对，覆盖 strength==2）
 
     private var noTrumpButton: some View {
-        let canUse = jokerCount >= 2 && state.declarationStrength < 2
+        let cur      = state.declarationStrength
+        let jokers   = smallJokerCount + bigJokerCount   // 用于指示点数量
+        let hasPair  = smallJokerCount >= 2 || bigJokerCount >= 2
+        let canUse   = hasPair && cur == 2
         return Button(action: {
             guard canUse else { return }
-            // 选 2 张大王宣告无主（用 bigJoker 的 suit=nil，特殊处理）
-            let picks = engine.localPlayer.hand
-                .filter { $0.rank == .bigJoker }
-                .prefix(2)
+            // 优先选大王，其次小王
+            let rank: Rank = bigJokerCount >= 2 ? .bigJoker : .smallJoker
+            let picks = engine.localPlayer.hand.filter { $0.rank == rank }.prefix(2)
             engine.state.selectedCards = Set(picks.map { $0.id })
             engine.humanDeclareTrump()
         }) {
@@ -191,7 +221,7 @@ struct DealingOverlayView: View {
                         Circle()
                             .frame(width: 4, height: 4)
                             .foregroundColor(
-                                i < jokerCount
+                                i < min(jokers, 2)
                                     ? (canUse ? .yellow : .white.opacity(0.3))
                                     : .white.opacity(0.08)
                             )
@@ -201,9 +231,7 @@ struct DealingOverlayView: View {
             .frame(width: 36, height: 38)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(canUse
-                        ? Color.purple.opacity(0.45)
-                        : Color.white.opacity(0.07))
+                    .fill(canUse ? Color.purple.opacity(0.45) : Color.white.opacity(0.07))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8)

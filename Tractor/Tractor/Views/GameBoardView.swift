@@ -2,6 +2,7 @@ import SwiftUI
 
 struct GameBoardView: View {
     @ObservedObject var engine: GameEngine
+    @State private var showHistory = false
 
     private var state: GameState { engine.state }
     private var localPosition: PlayerPosition { engine.localPosition }
@@ -14,6 +15,13 @@ struct GameBoardView: View {
             get: { self.engine.state.selectedCards },
             set: { self.engine.state.selectedCards = $0 }
         )
+    }
+
+    private var scoreBgColor: Color {
+        state.attackScore >= 80 ? Color.green.opacity(0.55) : Color.black.opacity(0.55)
+    }
+    private var historyBgColor: Color {
+        showHistory ? Color.blue.opacity(0.7) : Color.black.opacity(0.55)
     }
 
     var body: some View {
@@ -31,14 +39,6 @@ struct GameBoardView: View {
 
             // ── 横屏主布局 ──────────────────────────────
             VStack(spacing: 0) {
-
-                // 顶部信息栏
-                TrumpInfoBar(
-                    trumpSuit: state.trumpSuit,
-                    trumpRank: state.trumpRank,
-                    attackScore: state.attackScore,
-                    phase: state.phase
-                )
 
                 // 中间区域：西 | 北+桌面 | 东
                 HStack(spacing: 0) {
@@ -101,8 +101,85 @@ struct GameBoardView: View {
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.95)))
             }
+            // ── 常驻顶部浮层：主牌（左上）+ 分数（右上）+ 历史（右上角）
+            VStack(spacing: 0) {
+                HStack(alignment: .center, spacing: 8) {
+                    // 左上：当前主牌
+                    HStack(spacing: 4) {
+                        Text("主")
+                            .font(.system(size: 10))
+                            .foregroundColor(.white.opacity(0.6))
+                        if let suit = state.trumpSuit {
+                            Text(suit.rawValue)
+                                .font(.system(size: 15))
+                                .foregroundColor(suit.color == "red" ? .red : .white)
+                        } else {
+                            Text("—")
+                                .font(.system(size: 12))
+                                .foregroundColor(.white.opacity(0.4))
+                        }
+                        Text(state.trumpRank.display)
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.yellow)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.black.opacity(0.55))
+                    .clipShape(Capsule())
+
+                    Spacer()
+
+                    // 右上：攻方得分
+                    HStack(spacing: 4) {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 9))
+                            .foregroundColor(.yellow)
+                        Text("攻 \(state.attackScore)分")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(scoreBgColor)
+                    .clipShape(Capsule())
+
+                    // 历史记录按钮
+                    if !state.completedTricks.isEmpty {
+                        Button(action: { showHistory.toggle() }) {
+                            HStack(spacing: 3) {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .font(.system(size: 10))
+                                Text("记录")
+                                    .font(.system(size: 11, weight: .medium))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(historyBgColor)
+                            .clipShape(Capsule())
+                        }
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.top, 6)
+
+                Spacer()
+            }
+            .allowsHitTesting(!state.completedTricks.isEmpty)
+
+            // ── 历史出牌记录面板 ─────────────────────────
+            if showHistory {
+                TrickHistoryPanel(
+                    tricks: state.completedTricks,
+                    trumpSuit: state.trumpSuit,
+                    trumpRank: state.trumpRank,
+                    onClose: { showHistory = false }
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.97)))
+            }
         }
         .animation(.easeInOut(duration: 0.3), value: state.phase)
+        .animation(.easeInOut(duration: 0.2), value: showHistory)
     }
 
     // MARK: - 对家（横屏顶部，水平展示）
@@ -114,9 +191,14 @@ struct GameBoardView: View {
                     .foregroundColor(.yellow)
             }
             MiniCardBack(count: state.player(position).hand.count)
-            Text("\(position.displayName)  \(state.player(position).hand.count)张")
-                .font(.caption2)
-                .foregroundColor(.white.opacity(0.8))
+            HStack(spacing: 3) {
+                if state.dealerPosition == position {
+                    Text("👑").font(.system(size: 11))
+                }
+                Text("\(position.displayName)  \(state.player(position).hand.count)张")
+                    .font(.caption2)
+                    .foregroundColor(.white.opacity(0.8))
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
@@ -161,9 +243,14 @@ struct GameBoardView: View {
                 }
             }
             .frame(height: 60)
-            Text(position.displayName)
-                .font(.caption2.bold())
-                .foregroundColor(.white.opacity(0.8))
+            HStack(spacing: 2) {
+                if state.dealerPosition == position {
+                    Text("👑").font(.system(size: 10))
+                }
+                Text(position.displayName)
+                    .font(.caption2.bold())
+                    .foregroundColor(.white.opacity(0.8))
+            }
             Text("\(count)张")
                 .font(.system(size: 10))
                 .foregroundColor(.white.opacity(0.6))
@@ -219,6 +306,19 @@ struct GameBoardView: View {
     private var southArea: some View {
         VStack(spacing: 0) {
 
+            // ── 常驻：南家标识（含庄家皇冠）────────────
+            HStack(spacing: 6) {
+                if state.dealerPosition == localPosition {
+                    Text("👑").font(.system(size: 11))
+                }
+                Text("我（\(localPosition.displayName)）")
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.6))
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 4)
+
             // ── 发牌阶段：亮主面板 ──────────────────────
             if state.phase == .dealing {
                 DealingOverlayView(engine: engine)
@@ -240,9 +340,14 @@ struct GameBoardView: View {
             if state.phase == .playing {
                 HStack(spacing: 10) {
                     teamBadge(team: engine.localPlayer.team)
-                    Text("我（\(localPosition.displayName)）")
-                        .font(.caption.bold())
-                        .foregroundColor(.white.opacity(0.85))
+                    HStack(spacing: 3) {
+                        if state.dealerPosition == localPosition {
+                            Text("👑").font(.system(size: 12))
+                        }
+                        Text("我（\(localPosition.displayName)）")
+                            .font(.caption.bold())
+                            .foregroundColor(.white.opacity(0.85))
+                    }
                     Spacer()
                     if state.currentTurn == localPosition {
                         Button(action: {

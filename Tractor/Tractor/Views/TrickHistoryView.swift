@@ -1,0 +1,166 @@
+import SwiftUI
+
+/// 本局历史出牌记录面板
+struct TrickHistoryPanel: View {
+    let tricks: [Trick]
+    let trumpSuit: Suit?
+    let trumpRank: Rank
+    let onClose: () -> Void
+
+    private var evaluator: TrickEvaluator {
+        TrickEvaluator(trumpSuit: trumpSuit, trumpRank: trumpRank)
+    }
+
+    var body: some View {
+        ZStack {
+            // 背景遮罩
+            Color.black.opacity(0.60)
+                .ignoresSafeArea()
+                .onTapGesture { onClose() }
+
+            // 面板
+            VStack(spacing: 0) {
+                // 标题栏
+                HStack {
+                    Text("本局出牌记录")
+                        .font(.headline.bold())
+                        .foregroundColor(.white)
+                    Spacer()
+                    Text("共 \(tricks.count) 墩")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.5))
+                    Button(action: onClose) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title3)
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                    .padding(.leading, 8)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(Color.white.opacity(0.08))
+
+                Divider().background(Color.white.opacity(0.15))
+
+                // 记录列表
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(tricks.enumerated()), id: \.offset) { idx, trick in
+                            TrickHistoryRow(
+                                index: idx + 1,
+                                trick: trick,
+                                winner: evaluator.winner(of: trick)
+                            )
+                            if idx < tricks.count - 1 {
+                                Divider().background(Color.white.opacity(0.08))
+                                    .padding(.horizontal, 12)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
+            .frame(width: 480, height: 340)
+            .background(Color(red: 0.08, green: 0.14, blue: 0.22))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .shadow(color: .black.opacity(0.5), radius: 20)
+        }
+    }
+}
+
+// MARK: - 单墩行
+private struct TrickHistoryRow: View {
+    let index: Int
+    let trick: Trick
+    let winner: PlayerPosition
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 0) {
+            // 墩号
+            Text("#\(index)")
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundColor(.white.opacity(0.4))
+                .frame(width: 30, alignment: .leading)
+
+            // 先手标记
+            Text(trick.leadPosition.displayName)
+                .font(.system(size: 10))
+                .foregroundColor(.white.opacity(0.5))
+                .frame(width: 26, alignment: .center)
+
+            // 四家出牌
+            ForEach(orderedPlays, id: \.position.rawValue) { play in
+                playerColumn(play: play)
+            }
+
+            Spacer()
+
+            // 赢家
+            HStack(spacing: 3) {
+                Image(systemName: "crown.fill")
+                    .font(.system(size: 9))
+                    .foregroundColor(.yellow)
+                Text(winner.displayName)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.yellow)
+            }
+            .frame(width: 44, alignment: .trailing)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+    }
+
+    /// 按出牌顺序排列（先手打头）
+    private var orderedPlays: [(position: PlayerPosition, cards: [Card])] {
+        let order: [PlayerPosition] = [.south, .west, .north, .east]
+        let leadIdx = order.firstIndex(of: trick.leadPosition) ?? 0
+        let sorted = (0..<4).compactMap { offset -> (position: PlayerPosition, cards: [Card])? in
+            let pos = order[(leadIdx + offset) % 4]
+            return trick.plays.first(where: { $0.position == pos })
+        }
+        return sorted
+    }
+
+    @ViewBuilder
+    private func playerColumn(play: (position: PlayerPosition, cards: [Card])) -> some View {
+        VStack(alignment: .center, spacing: 2) {
+            Text(play.position.displayName)
+                .font(.system(size: 9))
+                .foregroundColor(play.position == trick.leadPosition
+                    ? .white.opacity(0.8) : .white.opacity(0.4))
+
+            // 牌列表（横排，最多显示 4 张，再多就省略）
+            let display = play.cards.prefix(4)
+            HStack(spacing: 2) {
+                ForEach(Array(display), id: \.id) { card in
+                    cardChip(card: card)
+                }
+                if play.cards.count > 4 {
+                    Text("+\(play.cards.count - 4)")
+                        .font(.system(size: 8))
+                        .foregroundColor(.white.opacity(0.4))
+                }
+            }
+
+            // 本墩得分
+            let pts = play.cards.reduce(0) { $0 + $1.pointValue }
+            if pts > 0 {
+                Text("+\(pts)")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(.orange)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func cardChip(card: Card) -> some View {
+        let isRed = card.suit?.color == "red"
+        return Text(card.shortDisplay)
+            .font(.system(size: 9, weight: .medium, design: .monospaced))
+            .foregroundColor(card.isJoker ? .yellow : (isRed ? .red : .white))
+            .padding(.horizontal, 3)
+            .padding(.vertical, 1)
+            .background(Color.white.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 3))
+    }
+}

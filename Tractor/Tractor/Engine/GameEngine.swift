@@ -58,9 +58,16 @@ class GameEngine: ObservableObject {
         state.phase     = .dealing
         state.trumpRank = state.currentDealerTeamLevel
 
-        // 确定庄家：在上一局庄家的同队队友之间轮换
-        let dealerPos = nextDealerPosition(dealerTeamIdx: state.dealerTeamIdx,
-                                           lastDealer: state.lastDealerPosition)
+        // 确定本局庄家
+        // - 第 1 局：先设默认庄家，发牌期间亮主可覆盖
+        // - 第 2 局起：庄家已在上局结算时确定，亮主不可更改
+        let dealerPos: PlayerPosition
+        if let pending = state.pendingDealerPosition {
+            dealerPos = pending
+            state.pendingDealerPosition = nil
+        } else {
+            dealerPos = state.dealerTeamIdx == 0 ? .south : .west
+        }
         setDealer(dealerPos)
 
         state.message = "正在发牌，可亮主..."
@@ -113,6 +120,16 @@ class GameEngine: ObservableObject {
         }
 
         try? await Task.sleep(nanoseconds: 300_000_000)
+        if Task.isCancelled { return }
+
+        // 发牌结束，给人类 10 秒考虑时间（可在此期间继续亮主）
+        for remaining in stride(from: 10, through: 1, by: -1) {
+            if Task.isCancelled { return }
+            state.postDealCountdown = remaining
+            syncMultiplayerState()
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+        state.postDealCountdown = 0
         if Task.isCancelled { return }
 
         afterDealingComplete()
@@ -192,10 +209,29 @@ class GameEngine: ObservableObject {
             return
         }
 
-        // 必须全是级牌（非大小王）
         let tr = state.trumpRank
+        let cur = state.declarationStrength
+
+        // ── 王牌路径：小王对或大王对，均为无主 (strength=3) ──
+        let isJokerPair = selected.count == 2 &&
+            (selected.allSatisfy { $0.rank == .smallJoker } ||
+             selected.allSatisfy { $0.rank == .bigJoker })
+        if isJokerPair {
+            guard cur == 2 else {
+                state.message = cur < 2 ? "需要先有级牌对子亮主才能反无主" : "已是无主，不可再反"
+                syncMultiplayerState()
+                return
+            }
+            applyDeclaration(position: position, suit: nil, strength: 3)
+            state.selectedCards = []
+            if state.dealtCount == 100 { proceedToKittyExchange() }
+            syncMultiplayerState()
+            return
+        }
+
+        // ── 普通路径：级牌亮主 ──────────────────────────
         guard selected.allSatisfy({ $0.rank == tr && !$0.isJoker }) else {
-            state.message = "亮主只能使用 \(tr.display) 且不能用王"
+            state.message = "亮主只能使用 \(tr.display)（或对子王牌反无主）"
             syncMultiplayerState()
             return
         }
@@ -210,9 +246,14 @@ class GameEngine: ObservableObject {
 
         let strength = min(selected.count, 2)
 
-        // 强度必须严格大于当前声明
-        guard strength > state.declarationStrength else {
-            let hint = state.declarationStrength == 1 ? "需要对子才能反主" : "已是最强亮主"
+        // 强度必须严格大于当前声明（级牌最高 strength=2）
+        guard strength > cur else {
+            let hint: String
+            switch cur {
+            case 1: hint = "需要对子才能反主"
+            case 2: hint = "级牌已满，可用小王或大王对反无主"
+            default: hint = "已是最强亮主"
+            }
             state.message = hint
             syncMultiplayerState()
             return
@@ -249,6 +290,16 @@ class GameEngine: ObservableObject {
             return
         }
 
+        // 王牌对反无主（小王或大王，覆盖 strength==2）
+        if cur == 2 {
+            let bigCount   = hand.filter { $0.rank == .bigJoker }.count
+            let smallCount = hand.filter { $0.rank == .smallJoker }.count
+            if bigCount >= 2 || smallCount >= 2 {
+                applyDeclaration(position: position, suit: nil, strength: 3)
+                return
+            }
+        }
+
         // 单张：只在无人亮主时随机亮（40% 概率）
         if cur == 0, let suit = counts.keys.first {
             if Int.random(in: 0..<100) < 40 {
@@ -259,17 +310,27 @@ class GameEngine: ObservableObject {
 
     /// 应用亮主声明
     /// 亮主更新主花色，并将庄家设为亮主玩家（标准拖拉机规则：谁亮主谁坐庄）
-    private func applyDeclaration(position: PlayerPosition, suit: Suit, strength: Int) {
-        state.trumpSuit = suit
+    private func applyDeclaration(position: PlayerPosition, suit: Suit?, strength: Int) {
+        state.trumpSuit = suit          // nil = 无主
         state.trumpDeclaration = TrumpDeclaration(
             declarer: position,
             suit: suit,
             strength: strength
         )
-        // 亮主者成为本局庄家
-        setDealer(position)
-        let badge = strength == 2 ? "（对子）" : "（单张）"
-        state.message = "\(position.displayName) 亮主坐庄：\(suit.rawValue)\(state.trumpRank.display) \(badge)"
+        // roundNumber == 0（第 1 局发牌中）：亮主者成为庄家
+        // roundNumber  > 0（第 2 局起）：庄家已定，亮主只更新主花色
+        if state.roundNumber == 0 {
+            setDealer(position)
+        }
+        let badge: String
+        switch strength {
+        case 1: badge = "（单张）"
+        case 2: badge = "（对子）"
+        case 3: badge = "（王牌对·无主）"
+        default: badge = ""
+        }
+        let suitStr = suit.map { $0.rawValue } ?? "无主"
+        state.message = "\(position.displayName) 亮主：\(suitStr)\(strength < 3 ? state.trumpRank.display : "") \(badge)"
         syncMultiplayerState()
     }
 
@@ -289,7 +350,8 @@ class GameEngine: ObservableObject {
             state.player(pos).sortHand(trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
         }
 
-        state.phase = .kittyExchange
+        state.phase        = .kittyExchange
+        state.currentTurn  = state.dealerPosition   // 让庄家手牌可交互
 
         if humanControlledPositions.contains(state.dealerPosition) {
             // 真人庄家换底
@@ -509,6 +571,7 @@ class GameEngine: ObservableObject {
     // MARK: - 结算一局
 
     private func resolveRound() {
+        state.roundNumber += 1   // 局结束后自增，之后亮主不再换庄
         state.phase = .roundEnd
 
         let kittyPoints  = state.kitty.reduce(0) { $0 + $1.pointValue }
@@ -530,7 +593,8 @@ class GameEngine: ObservableObject {
         var attackAdvance = 0
 
         if attackWon {
-            attackAdvance = finalScore >= 120 ? 3 : finalScore >= 100 ? 2 : 1
+            // 每超过80分的40分升一级：120升1级，160升2级，200升3级，以此类推
+            attackAdvance = (finalScore - 80) / 40
         } else {
             dealerAdvance = finalScore == 0 ? 3 : finalScore < 40 ? 2 : 1
         }
@@ -542,11 +606,10 @@ class GameEngine: ObservableObject {
             attackAdvance: attackAdvance
         )
 
-        // 记录本局庄家（用于下局庄家轮换）
-        state.lastDealerPosition = state.dealerPosition
-
         if attackWon {
             advanceLevel(team: state.attackTeamIdx, steps: attackAdvance)
+            // 攻方胜：新庄家 = 当前庄家顺时针下一位
+            state.pendingDealerPosition = nextPosition(after: state.dealerPosition)
             state.dealerTeamIdx = state.attackTeamIdx
         } else {
             advanceLevel(team: state.dealerTeamIdx, steps: dealerAdvance)
@@ -809,19 +872,4 @@ class GameEngine: ObservableObject {
         return order[(order.firstIndex(of: pos)! + 1) % 4]
     }
 
-    /// 根据庄家队伍和上一局庄家位置，计算本局初始庄家（同队内轮换）
-    private func nextDealerPosition(dealerTeamIdx: Int, lastDealer: PlayerPosition) -> PlayerPosition {
-        // team 0: south(.rawValue=0) <-> north(.rawValue=2)
-        // team 1: west(.rawValue=1)  <-> east(.rawValue=3)
-        let teamPairs: [Int: [PlayerPosition]] = [
-            0: [.south, .north],
-            1: [.west,  .east]
-        ]
-        let candidates = teamPairs[dealerTeamIdx] ?? [.south]
-        // 如果上一局庄家属于本队，轮换到另一个队友；否则默认第一个
-        if let idx = candidates.firstIndex(of: lastDealer) {
-            return candidates[(idx + 1) % candidates.count]
-        }
-        return candidates[0]
-    }
 }
