@@ -122,9 +122,12 @@ class GameEngine: ObservableObject {
         try? await Task.sleep(nanoseconds: 300_000_000)
         if Task.isCancelled { return }
 
-        // 发牌结束，给人类 10 秒考虑时间（可在此期间继续亮主）
+        // 发牌结束，给人类 10 秒考虑时间（可在此期间亮主/反主）
+        // 若人类已无法亮主或反主（手中无合法牌），直接跳过倒计时
         for remaining in stride(from: 10, through: 1, by: -1) {
             if Task.isCancelled { return }
+            // 每秒重新检测：若人类无法再亮/反主，提前结束倒计时
+            if !humanControlledPositions.isEmpty && !humanCanDeclareOrOverride() { break }
             state.postDealCountdown = remaining
             syncMultiplayerState()
             try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -269,28 +272,53 @@ class GameEngine: ObservableObject {
         syncMultiplayerState()
     }
 
-    // MARK: - AI 亮主逻辑
+    // MARK: - 人类亮主能力检测
 
-    private func aiConsiderDeclaration(position: PlayerPosition) {
-        let hand = state.player(position).hand
+    /// 返回人类玩家当前是否有能力亮主或反主
+    /// 用于发牌结束后判断是否需要给人类留倒计时思考时间
+    private func humanCanDeclareOrOverride() -> Bool {
+        let hand = localPlayer.hand
         let tr   = state.trumpRank
         let cur  = state.declarationStrength
 
-        // 统计每花色级牌数量
+        // strength==3 是最高等级，无法再反
+        if cur >= 3 { return false }
+
+        // 当前 strength==2：只有王牌对可以反无主
+        if cur == 2 {
+            let big   = hand.filter { $0.rank == .bigJoker }.count
+            let small = hand.filter { $0.rank == .smallJoker }.count
+            return big >= 2 || small >= 2
+        }
+
+        // cur < 2：统计手中每花色级牌数
         var counts: [Suit: Int] = [:]
         for card in hand where card.rank == tr {
             if let s = card.suit { counts[s, default: 0] += 1 }
         }
 
-        // 优先宣告对子（可覆盖任何单张声明）
-        if let best = counts.filter({ $0.value >= 2 }).max(by: { $0.value < $1.value }) {
-            if cur < 2 {
-                applyDeclaration(position: position, suit: best.key, strength: 2)
-            }
-            return
+        // 当前 strength==1：需要对子才能盖过
+        if cur == 1 { return counts.values.contains { $0 >= 2 } }
+
+        // 当前 strength==0：单张或对子均可
+        return !counts.isEmpty
+    }
+
+    // MARK: - AI 亮主逻辑
+
+    private func aiConsiderDeclaration(position: PlayerPosition) {
+        let hand    = state.player(position).hand
+        let tr      = state.trumpRank
+        let cur     = state.declarationStrength
+        let dealt   = state.dealtCount   // 0-100
+
+        // ── 统计每花色级牌数量（非王）──────────────────
+        var counts: [Suit: Int] = [:]
+        for card in hand where card.rank == tr {
+            if let s = card.suit { counts[s, default: 0] += 1 }
         }
 
-        // 王牌对反无主（小王或大王，覆盖 strength==2）
+        // ── 王牌对反无主（小王或大王，覆盖 strength==2）──
         if cur == 2 {
             let bigCount   = hand.filter { $0.rank == .bigJoker }.count
             let smallCount = hand.filter { $0.rank == .smallJoker }.count
@@ -300,11 +328,43 @@ class GameEngine: ObservableObject {
             }
         }
 
-        // 单张：只在无人亮主时随机亮（40% 概率）
-        if cur == 0, let suit = counts.keys.first {
-            if Int.random(in: 0..<100) < 40 {
-                applyDeclaration(position: position, suit: suit, strength: 1)
+        // ── 按发牌进度确定亮主门槛 ──────────────────────
+        // dealt < 33  : 不亮（太早）
+        // 33 ≤ dealt < 50  : 某花色 ≥ 5 张才亮
+        // 50 ≤ dealt < 75  : 某花色 ≥ 8 张，或手中有某花色 < 3 张
+        // dealt ≥ 75       : 某花色 ≥ 平均值（总张数 / 有牌花色数）
+        guard dealt >= 33 else { return }
+
+        func meetsThreshold(_ count: Int) -> Bool {
+            if dealt < 50 {
+                return count >= 5
+            } else if dealt < 75 {
+                if count >= 8 { return true }
+                // 手中某花色少于3张时降低门槛（弱花色，尽早亮主保护）
+                let minSuitCount = counts.values.min() ?? 0
+                return minSuitCount < 3
+            } else {
+                // 后半程：达到平均水平即可亮
+                let uniqueSuits = max(counts.count, 1)
+                let avg = hand.filter { $0.rank == tr && !$0.isJoker }.count / uniqueSuits
+                return count >= max(avg, 1)
             }
+        }
+
+        // ── 优先宣告对子 ──────────────────────────────
+        if let best = counts.filter({ $0.value >= 2 && meetsThreshold($0.value) })
+                            .max(by: { $0.value < $1.value }) {
+            if cur < 2 {
+                applyDeclaration(position: position, suit: best.key, strength: 2)
+            }
+            return
+        }
+
+        // ── 单张亮主（无人亮主时）────────────────────
+        if cur == 0,
+           let best = counts.filter({ meetsThreshold($0.value) })
+                            .max(by: { $0.value < $1.value }) {
+            applyDeclaration(position: position, suit: best.key, strength: 1)
         }
     }
 
@@ -613,6 +673,9 @@ class GameEngine: ObservableObject {
             state.dealerTeamIdx = state.attackTeamIdx
         } else {
             advanceLevel(team: state.dealerTeamIdx, steps: dealerAdvance)
+            // 守方胜：无论第几局，庄家都在队内轮换（搭档接任）
+            let partnerRaw = (state.dealerPosition.rawValue + 2) % 4
+            state.pendingDealerPosition = PlayerPosition(rawValue: partnerRaw)
         }
 
         if teamLevelRank(state.dealerTeamIdx) == .ace ||

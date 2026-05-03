@@ -166,9 +166,62 @@ struct TrickEvaluator {
         if winningSuit == nil && candidateSuit != nil { return false }
         // 不同副牌花色无法互压
         if candidateSuit != winningSuit { return false }
-        // 同花色：比代表牌，同大小先出者胜（beats 返回 false 时维持当前赢家）
+
+        // 甩牌先手：两家都出主牌时，按结构层级比较（连对 > 对子 > 单张）
+        if candidateSuit == nil, slamInfo(of: leadCards) != nil {
+            return slamTrumpBeats(cards, over: winningCards)
+        }
+
+        // 同花色（副牌）：比代表牌，同大小先出者胜
         let rep        = representativeCard(of: cards)
         let winningRep = representativeCard(of: winningCards)
+        return CardComparator.beats(rep, winningRep, trumpSuit: trumpSuit, trumpRank: trumpRank)
+    }
+
+    /// 甩牌先手时，两个主牌出牌（suit 均为 nil）之间的结构比较
+    /// 优先级：最高连对（对数多者优先，同对数比高牌） > 最高对子 > 最高单张
+    private func slamTrumpBeats(_ candidate: [Card], over winner: [Card]) -> Bool {
+        let cInfo = decomposeSlam(candidate, suit: nil)
+        let wInfo = decomposeSlam(winner,    suit: nil)
+
+        // ① 比最高连对（先比对数，再比最高牌）
+        let cTopTractor = cInfo.tractors
+            .compactMap { tractorInfo(of: $0) }
+            .max { a, b in
+                a.pairCount != b.pairCount
+                    ? a.pairCount < b.pairCount
+                    : CardComparator.beats(b.highCard, a.highCard, trumpSuit: trumpSuit, trumpRank: trumpRank)
+            }
+        let wTopTractor = wInfo.tractors
+            .compactMap { tractorInfo(of: $0) }
+            .max { a, b in
+                a.pairCount != b.pairCount
+                    ? a.pairCount < b.pairCount
+                    : CardComparator.beats(b.highCard, a.highCard, trumpSuit: trumpSuit, trumpRank: trumpRank)
+            }
+
+        if let cT = cTopTractor, let wT = wTopTractor {
+            if cT.pairCount != wT.pairCount { return cT.pairCount > wT.pairCount }
+            return CardComparator.beats(cT.highCard, wT.highCard, trumpSuit: trumpSuit, trumpRank: trumpRank)
+        } else if cTopTractor != nil { return true  }   // candidate 有连对，winner 无 → candidate 赢
+          else if wTopTractor != nil { return false }   // winner 有连对，candidate 无 → winner 保持
+
+        // ② 比最高对子
+        let cTopPair = cInfo.pairs
+            .compactMap { pairRepresentative(of: $0) }
+            .max { CardComparator.beats($1, $0, trumpSuit: trumpSuit, trumpRank: trumpRank) }
+        let wTopPair = wInfo.pairs
+            .compactMap { pairRepresentative(of: $0) }
+            .max { CardComparator.beats($1, $0, trumpSuit: trumpSuit, trumpRank: trumpRank) }
+
+        if let cP = cTopPair, let wP = wTopPair {
+            return CardComparator.beats(cP, wP, trumpSuit: trumpSuit, trumpRank: trumpRank)
+        } else if cTopPair != nil { return true  }
+          else if wTopPair != nil { return false }
+
+        // ③ 比最高单张
+        let rep        = representativeCard(of: candidate)
+        let winningRep = representativeCard(of: winner)
         return CardComparator.beats(rep, winningRep, trumpSuit: trumpSuit, trumpRank: trumpRank)
     }
 

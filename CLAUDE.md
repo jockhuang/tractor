@@ -96,10 +96,21 @@ Views/
 
 > 甩牌未被将吃时，甩牌者为大（无人打出主牌则先手始终是赢家）
 
+**甩牌时多家出主牌的比较**（`slamTrumpBeats`）：
+先手为甩牌时，多个主牌出牌按结构层级比较（不能单纯比最高单张）：
+1. 先比**最高连对**（对数多者优先，同对数比最高牌）
+2. 无连对：比**最高对子**
+3. 无对子：比**最高单张**
+
 **亮主规则**：
 - **第 1 局**：亮主者成为庄家（`applyDeclaration` 调用 `setDealer`，反主可覆盖）
 - **第 2 局起**：庄家在 `startNewRound` 开始时由上局结果一次性确定，亮主**只更新主花色**，不得再调用 `setDealer`
 - 判断依据：`state.roundNumber == 0`（`resolveRound` 结束时自增，`startNewGame` 重置为 0；发牌期间第 1 局 roundNumber 始终为 0）
+
+**庄家轮换规则**（`resolveRound`）：
+- 攻方胜：新庄家 = 当前庄家顺时针下一位（`nextPosition(after:)`）
+- 守方胜：新庄家 = 当前庄家的搭档（`(rawValue + 2) % 4`），**无论第几局都轮换**
+  - ⚠️ 切勿加 `roundNumber > N` 之类的条件保护，每次守方赢都必须设置 `pendingDealerPosition`
 
 ---
 

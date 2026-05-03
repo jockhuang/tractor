@@ -29,9 +29,12 @@ struct CardComparator {
     static func nonTrumpWeight(_ card: Card) -> Int { card.rank.rawValue }
 
     static func pairKey(_ card: Card, trumpSuit: Suit?, trumpRank: Rank) -> String {
-        if card.rank == .bigJoker { return "bigJoker" }
+        if card.rank == .bigJoker   { return "bigJoker" }
         if card.rank == .smallJoker { return "smallJoker" }
-        if card.rank == trumpRank { return "trumpRank_\(card.suit?.rawValue ?? "x")" }
+        if card.rank == trumpRank {
+            // 级牌对子以花色区分：同花色才能配对（♥5+♥5 合法，♥5+♣5 不合法）
+            return "trumpRank_\(card.suit?.rawValue ?? "x")"
+        }
         return "\(card.suit?.rawValue ?? "x")_\(card.rank.rawValue)"
     }
 
@@ -75,8 +78,13 @@ struct CardComparator {
         if !aT && bT { return false }
 
         if aT && bT {
-            return trumpWeight(a, trumpSuit: trumpSuit, trumpRank: trumpRank)
-                 > trumpWeight(b, trumpSuit: trumpSuit, trumpRank: trumpRank)
+            let aW = trumpWeight(a, trumpSuit: trumpSuit, trumpRank: trumpRank)
+            let bW = trumpWeight(b, trumpSuit: trumpSuit, trumpRank: trumpRank)
+            if aW != bW { return aW > bW }
+            // 同权重（如多张非主花色级牌）：按实际花色分组，使对子在界面上相邻
+            let aSuit = a.suit?.rawValue ?? ""
+            let bSuit = b.suit?.rawValue ?? ""
+            return aSuit < bSuit
         }
 
         // 都不是主牌：先按花色分，再按大小
