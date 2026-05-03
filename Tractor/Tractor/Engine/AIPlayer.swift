@@ -287,6 +287,17 @@ struct AIPlayer {
             )
         }
 
+        // ── 甩牌 ─────────────────────────────────────────────
+        if let slam = evaluator.slamInfo(of: leadCards) {
+            return followSlam(
+                slam: slam, winningCards: winningCards,
+                partnerWinning: partnerWinning,
+                suitCards: suitCards, hand: hand,
+                position: position, count: count,
+                ts: ts, tr: tr, ctx: ctx
+            )
+        }
+
         // ── 单牌 ─────────────────────────────────────────────
         var chosen: [Card] = []
 
@@ -462,14 +473,15 @@ struct AIPlayer {
             let availableTractors = tractors(in: suitCards, pairCount: leadTractor.pairCount,
                                              trumpSuit: trumpSuit, trumpRank: trumpRank)
             if partnerWinning {
-                // 规则：有连对必须出连对；无连对再按支持策略
+                // 规则：有连对必须出连对；无连对按结构规则选牌（对子优先）
                 if let weakestTractor = availableTractors.sorted(by: {
                     weakerTractor($0, than: $1, trumpSuit: trumpSuit, trumpRank: trumpRank)
                 }).first {
                     return weakestTractor   // 出最弱连对，保留大牌
                 }
-                return safePartnerCards(from: suitCards, count: count,
-                                        trumpSuit: trumpSuit, trumpRank: trumpRank, ctx: ctx)
+                return structuredSuitFollowCards(suitCards: suitCards,
+                                                 neededPairs: leadTractor.pairCount,
+                                                 trumpSuit: trumpSuit, trumpRank: trumpRank)
             }
             if let winningTractor = tractorInfo(of: winningCards, trumpSuit: trumpSuit, trumpRank: trumpRank) {
                 let beatingTractors = availableTractors
@@ -485,8 +497,10 @@ struct AIPlayer {
             if let weakest = availableTractors.sorted(by: {
                 weakerTractor($0, than: $1, trumpSuit: trumpSuit, trumpRank: trumpRank)
             }).first { return weakest }
-            return weakestCards(from: suitCards, count: count,
-                                trumpSuit: trumpSuit, trumpRank: trumpRank)
+            // 无合适连对：按规则选牌（最大化对子，再填散牌）
+            return structuredSuitFollowCards(suitCards: suitCards,
+                                             neededPairs: leadTractor.pairCount,
+                                             trumpSuit: trumpSuit, trumpRank: trumpRank)
         }
 
         if suitCards.isEmpty,
@@ -588,6 +602,125 @@ struct AIPlayer {
         return suitCards + extra
     }
 
+    // MARK: - 甩牌跟牌
+
+    /// 跟甩牌：有同花色正常出弱牌；无同花色时只在能组成匹配将牌结构时才出主，否则垫非主牌
+    private static func followSlam(
+        slam: TrickEvaluator.SlamInfo,
+        winningCards: [Card],
+        partnerWinning: Bool,
+        suitCards: [Card],
+        hand: [Card],
+        position: PlayerPosition,
+        count: Int,
+        ts: Suit?, tr: Rank,
+        ctx: AIContext
+    ) -> [Card] {
+        // 有足够同花色：直接出最弱的，甩牌的同花色跟牌无需结构匹配
+        if suitCards.count >= count {
+            return partnerWinning
+                ? safePartnerCards(from: suitCards, count: count,
+                                   trumpSuit: ts, trumpRank: tr, ctx: ctx)
+                : weakestCards(from: suitCards, count: count, trumpSuit: ts, trumpRank: tr)
+        }
+
+        // 先出所有同花色
+        var chosen = suitCards
+        let remaining = count - chosen.count
+        guard remaining > 0 else { return chosen }
+
+        let usedIDs   = Set(chosen.map { $0.id })
+        let extra     = hand.filter { !usedIDs.contains($0.id) }
+        let trumpPool = extra.filter {  CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr) }
+        let nonTrump  = extra.filter { !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr) }
+
+        // 完全绝牌且敌方赢 → 尝试组成匹配甩牌结构的将牌将吃
+        if suitCards.isEmpty && !partnerWinning {
+            if let trumpCombo = buildMatchingSlamTrump(
+                slam: slam, trumpCards: trumpPool,
+                winningCards: winningCards, ts: ts, tr: tr
+            ) {
+                return trumpCombo
+            }
+        }
+
+        // 无法将吃或队友赢：优先垫非主牌，不浪费主牌
+        var fills = smartDiscard(
+            from: nonTrump, count: remaining,
+            enemyWinning: !partnerWinning,
+            ts: ts, tr: tr, myTeam: position.team, ctx: ctx
+        )
+        // 非主牌不够时才补最弱主牌
+        if fills.count < remaining {
+            let usedIDs2    = Set(fills.map { $0.id })
+            let trumpLeft   = trumpPool.filter { !usedIDs2.contains($0.id) }
+            fills += weakestCards(from: trumpLeft, count: remaining - fills.count,
+                                  trumpSuit: ts, trumpRank: tr)
+        }
+        chosen += Array(fills.prefix(remaining))
+        return Array(chosen.prefix(count))
+    }
+
+    /// 在主牌中构造与甩牌结构完全匹配的最弱组合，并检查能否压过当前赢家
+    /// 找不到合格组合时返回 nil
+    private static func buildMatchingSlamTrump(
+        slam: TrickEvaluator.SlamInfo,
+        trumpCards: [Card],
+        winningCards: [Card],
+        ts: Suit?, tr: Rank
+    ) -> [Card]? {
+        let tractorSizes = slam.tractors
+            .compactMap { tractorInfo(of: $0, trumpSuit: ts, trumpRank: tr)?.pairCount }
+            .sorted(by: >)
+
+        // 贪心构造：依次取最弱的连对 → 对子 → 单张
+        var pool   = trumpCards
+        var result = [Card]()
+
+        for neededSize in tractorSizes {
+            let candidates = tractors(in: pool, pairCount: neededSize,
+                                      trumpSuit: ts, trumpRank: tr)
+                .sorted { weakerTractor($0, than: $1, trumpSuit: ts, trumpRank: tr) }
+            guard let weakest = candidates.first else { return nil }
+            result += weakest
+            let ids = Set(weakest.map { $0.id })
+            pool = pool.filter { !ids.contains($0.id) }
+        }
+
+        for _ in 0..<slam.pairs.count {
+            let candidates = pairs(in: pool, trumpSuit: ts, trumpRank: tr)
+                .sorted { weakerPair($0, than: $1, trumpSuit: ts, trumpRank: tr) }
+            guard let weakest = candidates.first else { return nil }
+            result += weakest
+            let ids = Set(weakest.map { $0.id })
+            pool = pool.filter { !ids.contains($0.id) }
+        }
+
+        for _ in 0..<slam.singles.count {
+            let sorted = pool.sorted { discardOrder($0, before: $1, trumpSuit: ts, trumpRank: tr) }
+            guard let weakest = sorted.first else { return nil }
+            result.append(weakest)
+            pool = pool.filter { $0.id != weakest.id }
+        }
+
+        guard result.count == slam.count else { return nil }
+
+        // 判断能否压过当前赢家
+        let winnerIsTrump = winningCards.first.map {
+            CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
+        } ?? false
+
+        if !winnerIsTrump { return result }  // 主牌必然大于非主赢家
+
+        // 赢家也是主牌：用最高牌近似比较（足够 AI 决策）
+        let comboHigh  = result.max      { CardComparator.beats($1, $0, trumpSuit: ts, trumpRank: tr) }!
+        let winnerHigh = winningCards.max { CardComparator.beats($1, $0, trumpSuit: ts, trumpRank: tr) }!
+        guard CardComparator.beats(comboHigh, winnerHigh, trumpSuit: ts, trumpRank: tr) else {
+            return nil  // 压不过 → 不浪费主牌
+        }
+        return result
+    }
+
     // MARK: - 领出辅助
 
     /// 队友赢时决定是否扔分牌：只有「本墩最后出牌」或「大主牌已基本耗尽」时才贡献分牌
@@ -648,6 +781,59 @@ struct AIPlayer {
     }
 
     // MARK: - Utility Helpers（与原版一致）
+
+    /// 从同花色牌中按结构优先选出 neededPairs*2 张牌：
+    /// 连对优先 → 孤立对子 → 散牌，避免出弱牌时拆散对子
+    private static func structuredSuitFollowCards(
+        suitCards: [Card],
+        neededPairs: Int,
+        trumpSuit: Suit?,
+        trumpRank: Rank
+    ) -> [Card] {
+        let count = neededPairs * 2
+        var pool = suitCards
+        var result = [Card]()
+        var pairsLeft = neededPairs
+
+        // 1. 贡献尽可能多的连对（取最弱的优先，从最大可用 size 往下贪心）
+        var improved = true
+        while pairsLeft >= 2 && improved {
+            improved = false
+            for size in stride(from: pairsLeft, through: 2, by: -1) {
+                let candidates = tractors(in: pool, pairCount: size,
+                                          trumpSuit: trumpSuit, trumpRank: trumpRank)
+                    .sorted { weakerTractor($0, than: $1, trumpSuit: trumpSuit, trumpRank: trumpRank) }
+                if let t = candidates.first {
+                    result += t
+                    let ids = Set(t.map { $0.id })
+                    pool = pool.filter { !ids.contains($0.id) }
+                    pairsLeft -= size
+                    improved = true
+                    break
+                }
+            }
+        }
+
+        // 2. 贡献孤立对子（取最弱的优先）
+        while pairsLeft > 0 {
+            let available = pairs(in: pool, trumpSuit: trumpSuit, trumpRank: trumpRank)
+                .sorted { weakerPair($0, than: $1, trumpSuit: trumpSuit, trumpRank: trumpRank) }
+            guard let p = available.first else { break }
+            result += p
+            let ids = Set(p.map { $0.id })
+            pool = pool.filter { !ids.contains($0.id) }
+            pairsLeft -= 1
+        }
+
+        // 3. 用最弱散牌填充剩余张数
+        let needed = count - result.count
+        if needed > 0 {
+            result += weakestCards(from: pool, count: needed,
+                                   trumpSuit: trumpSuit, trumpRank: trumpRank)
+        }
+
+        return Array(result.prefix(count))
+    }
 
     private static func maxCard(in cards: [Card], ts: Suit?, tr: Rank) -> Card {
         cards.max { a, b in CardComparator.beats(b, a, trumpSuit: ts, trumpRank: tr) }!

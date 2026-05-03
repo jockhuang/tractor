@@ -158,6 +158,7 @@ struct CardView: View {
 // MARK: - Mini card for AI players
 struct MiniCardBack: View {
     var count: Int
+    var cardHeight: CGFloat = 52
 
     var body: some View {
         ZStack {
@@ -168,11 +169,12 @@ struct MiniCardBack: View {
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ))
-                    .frame(width: 36, height: 52)
+                    .frame(width: cardHeight * 0.69, height: cardHeight)
                     .offset(x: CGFloat(i) * 4 - CGFloat(min(count,5)) * 2)
                     .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
             }
         }
+        .frame(height: cardHeight)  // 固定高度，count=0 时也保留空间
     }
 }
 

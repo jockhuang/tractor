@@ -26,17 +26,6 @@ struct GameBoardView: View {
 
     var body: some View {
         ZStack {
-            // 绿桌背景
-            LinearGradient(
-                gradient: Gradient(colors: [
-                    Color(red: 0.07, green: 0.35, blue: 0.12),
-                    Color(red: 0.05, green: 0.25, blue: 0.09)
-                ]),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-
             // ── 横屏主布局 ──────────────────────────────
             VStack(spacing: 0) {
 
@@ -47,7 +36,7 @@ struct GameBoardView: View {
                     sideAIArea(position: leftPosition)
                         .frame(width: 72)
 
-                    // 中央：对家 + 桌面 + 消息
+                    // 中央：对家 + 桌面
                     VStack(spacing: 0) {
                         topAIArea(position: topPosition)
                             .padding(.top, 4)
@@ -55,9 +44,6 @@ struct GameBoardView: View {
                         // 桌面中央
                         centerArea
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                        // 消息栏
-                        messageBar
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -101,6 +87,7 @@ struct GameBoardView: View {
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.95)))
             }
+
             // ── 常驻顶部浮层：主牌（左上）+ 分数（右上）+ 历史（右上角）
             VStack(spacing: 0) {
                 HStack(alignment: .center, spacing: 8) {
@@ -177,9 +164,40 @@ struct GameBoardView: View {
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.97)))
             }
+
+            // ── 悬浮消息 toast（不占用布局空间）────────────
+            if !state.message.isEmpty {
+                VStack {
+                    Spacer()
+                    Text(state.message)
+                        .font(.system(size: 12))
+                        .foregroundColor(.white.opacity(0.92))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .background(Color.black.opacity(0.55))
+                        .clipShape(Capsule())
+                        .padding(.bottom, 8)
+                }
+                .allowsHitTesting(false)
+                .transition(.opacity)
+            }
         }
+        .background(
+            LinearGradient(
+                gradient: Gradient(colors: [
+                    Color(red: 0.07, green: 0.35, blue: 0.12),
+                    Color(red: 0.05, green: 0.25, blue: 0.09)
+                ]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+        )
         .animation(.easeInOut(duration: 0.3), value: state.phase)
         .animation(.easeInOut(duration: 0.2), value: showHistory)
+        .animation(.easeInOut(duration: 0.25), value: state.message)
     }
 
     // MARK: - 对家（横屏顶部，水平展示）
@@ -190,7 +208,7 @@ struct GameBoardView: View {
                     .font(.caption)
                     .foregroundColor(.yellow)
             }
-            MiniCardBack(count: state.player(position).hand.count)
+            MiniCardBack(count: state.player(position).hand.count, cardHeight: 28)
             HStack(spacing: 3) {
                 if state.dealerPosition == position {
                     Text("👑").font(.system(size: 11))
@@ -266,7 +284,7 @@ struct GameBoardView: View {
 
     // MARK: - 中央桌面
     private var centerArea: some View {
-        ZStack {
+        ZStack(alignment: .bottom) {
             TrickAreaView(
                 trick: state.currentTrick,
                 trumpSuit: state.trumpSuit,
@@ -274,32 +292,17 @@ struct GameBoardView: View {
                 localPosition: localPosition
             )
             if state.currentTurn == localPosition && state.phase == .playing {
-                VStack {
-                    Spacer()
-                    Text("轮到你出牌")
-                        .font(.caption.bold())
-                        .foregroundColor(.yellow)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(Color.black.opacity(0.45))
-                        .clipShape(Capsule())
-                        .padding(.bottom, 6)
-                }
+                Text("轮到你出牌")
+                    .font(.caption.bold())
+                    .foregroundColor(.yellow)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.black.opacity(0.45))
+                    .clipShape(Capsule())
+                    .padding(.bottom, 6)
+                    .allowsHitTesting(false)
             }
         }
-    }
-
-    // MARK: - 消息栏
-    private var messageBar: some View {
-        Text(state.message.isEmpty ? " " : state.message)
-            .font(.system(size: 12))
-            .foregroundColor(.white.opacity(0.85))
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
-            .frame(maxWidth: .infinity)
-            .background(Color.black.opacity(0.3))
     }
 
     // MARK: - 南家手牌区
@@ -319,25 +322,24 @@ struct GameBoardView: View {
             .padding(.horizontal, 14)
             .padding(.top, 4)
 
-            // ── 发牌阶段：亮主面板 ──────────────────────
-            if state.phase == .dealing {
+            // ── 阶段操作栏（ZStack 固定高度，避免切换时布局抖动）─
+            ZStack(alignment: .top) {
+                // 发牌阶段：亮主面板（最高，决定 ZStack 高度）
                 DealingOverlayView(engine: engine)
-                    .transition(.opacity)
-            }
+                    .opacity(state.phase == .dealing ? 1 : 0)
+                    .allowsHitTesting(state.phase == .dealing)
 
-            // ── 换底阶段：紧凑换底栏 ────────────────────
-            if state.phase == .kittyExchange && state.dealerPosition == localPosition {
+                // 换底阶段：紧凑换底栏
                 KittyInfoBar(
                     selectedCount: state.selectedCards.count,
                     onConfirm: {
                         engine.confirmKittyExchange(selectedIDs: state.selectedCards)
                     }
                 )
-                .transition(.opacity)
-            }
+                .opacity(state.phase == .kittyExchange && state.dealerPosition == localPosition ? 1 : 0)
+                .allowsHitTesting(state.phase == .kittyExchange && state.dealerPosition == localPosition)
 
-            // ── 出牌阶段 & 通用信息行 ───────────────────
-            if state.phase == .playing {
+                // 出牌阶段：出牌操作栏
                 HStack(spacing: 10) {
                     teamBadge(team: engine.localPlayer.team)
                     HStack(spacing: 3) {
@@ -349,29 +351,30 @@ struct GameBoardView: View {
                             .foregroundColor(.white.opacity(0.85))
                     }
                     Spacer()
-                    if state.currentTurn == localPosition {
-                        Button(action: {
-                            engine.humanPlay(selectedIDs: state.selectedCards)
-                        }) {
-                            HStack(spacing: 5) {
-                                Image(systemName: "play.fill").font(.caption2)
-                                Text("出牌 (\(state.selectedCards.count)张)")
-                                    .font(.caption.bold())
-                            }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
-                            .background(state.selectedCards.isEmpty
-                                ? Color.gray.opacity(0.5) : Color.blue)
-                            .clipShape(Capsule())
-                            .shadow(color: .blue.opacity(0.3), radius: 3)
+                    Button(action: {
+                        engine.humanPlay(selectedIDs: state.selectedCards)
+                    }) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "play.fill").font(.caption2)
+                            Text("出牌 (\(state.selectedCards.count)张)")
+                                .font(.caption.bold())
                         }
-                        .disabled(state.selectedCards.isEmpty)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(state.selectedCards.isEmpty
+                            ? Color.gray.opacity(0.5) : Color.blue)
+                        .clipShape(Capsule())
+                        .shadow(color: .blue.opacity(0.3), radius: 3)
                     }
+                    .disabled(state.selectedCards.isEmpty || state.currentTurn != localPosition)
+                    .opacity(state.currentTurn == localPosition ? 1 : 0)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 5)
                 .background(Color.black.opacity(0.22))
+                .opacity(state.phase == .playing ? 1 : 0)
+                .allowsHitTesting(state.phase == .playing)
             }
 
             // ── 手牌（始终可见）────────────────────────

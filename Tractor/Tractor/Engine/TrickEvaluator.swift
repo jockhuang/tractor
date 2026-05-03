@@ -161,16 +161,25 @@ struct TrickEvaluator {
         }
 
         // ── 先手出单牌（含甩牌）──────────────────────────────────────
-        // 将牌 > 副牌
+
+        // 甩牌先手：将牌将吃必须牌型完全匹配甩牌结构（连对/对子/单张数均一致），否则视为垫牌
+        if let slam = slamInfo(of: leadCards) {
+            // 副牌无法压甩牌（甩牌者始终是副牌赢家）
+            guard candidateSuit == nil else { return false }
+            // 将牌牌型必须与甩牌结构完全匹配，否则是垫牌
+            guard trumpMatchesSlamStructure(cards, slam: slam) else { return false }
+            // 候选合格：若当前赢家是副牌（甩牌者），直接胜出
+            if winningSuit != nil { return true }
+            // 当前赢家也是将牌：验证其资格，再按结构层级比大小
+            guard trumpMatchesSlamStructure(winningCards, slam: slam) else { return true }
+            return slamTrumpBeats(cards, over: winningCards)
+        }
+
+        // 非甩牌单牌：将牌 > 副牌
         if winningSuit != nil && candidateSuit == nil { return true }
         if winningSuit == nil && candidateSuit != nil { return false }
         // 不同副牌花色无法互压
         if candidateSuit != winningSuit { return false }
-
-        // 甩牌先手：两家都出主牌时，按结构层级比较（连对 > 对子 > 单张）
-        if candidateSuit == nil, slamInfo(of: leadCards) != nil {
-            return slamTrumpBeats(cards, over: winningCards)
-        }
 
         // 同花色（副牌）：比代表牌，同大小先出者胜
         let rep        = representativeCard(of: cards)
@@ -223,6 +232,29 @@ struct TrickEvaluator {
         let rep        = representativeCard(of: candidate)
         let winningRep = representativeCard(of: winner)
         return CardComparator.beats(rep, winningRep, trumpSuit: trumpSuit, trumpRank: trumpRank)
+    }
+
+    /// 判断将牌出牌是否与甩牌结构完全匹配（连对组数/各组对数、孤立对子数、单张数均一致）
+    /// 只有完全匹配才有资格将吃，否则视为垫牌
+    private func trumpMatchesSlamStructure(_ trumpCards: [Card], slam: SlamInfo) -> Bool {
+        let trumpInfo = decomposeSlam(trumpCards, suit: nil)
+
+        // 连对组件：组数相同，且各组对数一一对应（排序后比较）
+        let slamTractorSizes  = slam.tractors
+            .compactMap { tractorInfo(of: $0)?.pairCount }
+            .sorted()
+        let trumpTractorSizes = trumpInfo.tractors
+            .compactMap { tractorInfo(of: $0)?.pairCount }
+            .sorted()
+        guard slamTractorSizes == trumpTractorSizes else { return false }
+
+        // 孤立对子数相同
+        guard trumpInfo.pairs.count == slam.pairs.count else { return false }
+
+        // 单张数相同
+        guard trumpInfo.singles.count == slam.singles.count else { return false }
+
+        return true
     }
 
     private func tractorInfo(of cards: [Card]) -> TractorInfo? {

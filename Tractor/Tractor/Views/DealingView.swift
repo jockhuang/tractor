@@ -51,15 +51,14 @@ struct DealingOverlayView: View {
             }
 
             // ── 倒计时（发牌结束后思考时间）─────────────
-            if state.postDealCountdown > 0 {
-                Text("\(state.postDealCountdown)")
-                    .font(.system(size: 15, weight: .bold, design: .monospaced))
-                    .foregroundColor(state.postDealCountdown <= 3 ? .red : .yellow)
-                    .frame(width: 28, height: 28)
-                    .background(Color.black.opacity(0.4))
-                    .clipShape(Circle())
-                    .overlay(Circle().strokeBorder(Color.yellow.opacity(0.5), lineWidth: 1))
-            }
+            Text("\(state.postDealCountdown)")
+                .font(.system(size: 15, weight: .bold, design: .monospaced))
+                .foregroundColor(state.postDealCountdown <= 3 ? .red : .yellow)
+                .frame(width: 28, height: 28)
+                .background(Color.black.opacity(0.4))
+                .clipShape(Circle())
+                .overlay(Circle().strokeBorder(Color.yellow.opacity(0.5), lineWidth: 1))
+                .opacity(state.postDealCountdown > 0 ? 1 : 0)
 
             // ── 快速发牌 ───────────────────────────────
             Button(action: { engine.toggleFastDealing() }) {
