@@ -13,9 +13,9 @@ struct PlayerHandView: View {
 
     var body: some View {
         let cards = player.hand
-        let count  = min(cards.count, maxVisible)
-        let total  = cardWidth + CGFloat(count - 1) * cardWidth * overlapFactor
-        let maxW   = UIScreen.main.bounds.width - 32
+//        let count  = min(cards.count, maxVisible)
+//        let total  = cardWidth + CGFloat(count - 1) * cardWidth * overlapFactor
+//        let maxW   = UIScreen.main.bounds.width - 32
 
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: -(cardWidth * (1 - overlapFactor))) {

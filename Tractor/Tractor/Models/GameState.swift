@@ -39,6 +39,9 @@ struct RoundResult: Codable {
     let attackTeamWon: Bool
     let levelAdvance: Int
     let attackAdvance: Int
+    let kittyCards: [Card]        // 底牌内容（用于局末展示）
+    let kittyMultiplier: Int      // 底牌翻倍系数（由最后一墩牌型决定）
+    let rawKittyPoints: Int       // 底牌原始分（翻倍前）
 }
 
 // MARK: - GameState

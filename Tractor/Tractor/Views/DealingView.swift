@@ -202,7 +202,7 @@ struct DealingOverlayView: View {
         let cur      = state.declarationStrength
         let jokers   = smallJokerCount + bigJokerCount   // 用于指示点数量
         let hasPair  = smallJokerCount >= 2 || bigJokerCount >= 2
-        let canUse   = hasPair && cur == 2
+        let canUse   = hasPair && cur < 3
         return Button(action: {
             guard canUse else { return }
             // 优先选大王，其次小王

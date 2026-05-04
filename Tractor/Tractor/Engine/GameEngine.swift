@@ -216,12 +216,13 @@ class GameEngine: ObservableObject {
         let cur = state.declarationStrength
 
         // ── 王牌路径：小王对或大王对，均为无主 (strength=3) ──
+        // 可在任意 cur < 3 时直接亮无主（不要求先有级牌对子）
         let isJokerPair = selected.count == 2 &&
             (selected.allSatisfy { $0.rank == .smallJoker } ||
              selected.allSatisfy { $0.rank == .bigJoker })
         if isJokerPair {
-            guard cur == 2 else {
-                state.message = cur < 2 ? "需要先有级牌对子亮主才能反无主" : "已是无主，不可再反"
+            guard cur < 3 else {
+                state.message = "已是无主，不可再反"
                 syncMultiplayerState()
                 return
             }
@@ -284,14 +285,15 @@ class GameEngine: ObservableObject {
         // strength==3 是最高等级，无法再反
         if cur >= 3 { return false }
 
-        // 当前 strength==2：只有王牌对可以反无主
-        if cur == 2 {
-            let big   = hand.filter { $0.rank == .bigJoker }.count
-            let small = hand.filter { $0.rank == .smallJoker }.count
-            return big >= 2 || small >= 2
-        }
+        // 王对（大王对或小王对）在任意 cur < 3 时均可亮无主
+        let bigJokers   = hand.filter { $0.rank == .bigJoker }.count
+        let smallJokers = hand.filter { $0.rank == .smallJoker }.count
+        if bigJokers >= 2 || smallJokers >= 2 { return true }
 
-        // cur < 2：统计手中每花色级牌数
+        // 当前 strength==2：只有王牌对能盖过（已在上面检查，此处已无能力）
+        if cur == 2 { return false }
+
+        // cur < 2：检查手中级牌
         var counts: [Suit: Int] = [:]
         for card in hand where card.rank == tr {
             if let s = card.suit { counts[s, default: 0] += 1 }
@@ -462,13 +464,41 @@ class GameEngine: ObservableObject {
         player.hand.append(contentsOf: state.kitty)
         player.sortHand(trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
 
-        let nonTrump = player.hand.filter {
-            !CardComparator.isTrump($0, trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
-        }.sorted { a, b in
-            CardComparator.handSortOrder(b, a, trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
+        let ts = state.trumpSuit
+        let tr = state.trumpRank
+        let hand = player.hand
+
+        // 找出所有对子组（同一 pairKey 有 ≥2 张）
+        var pairGroupMap: [String: [Card]] = [:]
+        for card in hand {
+            pairGroupMap[CardComparator.pairKey(card, trumpSuit: ts, trumpRank: tr), default: []].append(card)
+        }
+        let pairedIDs = Set(pairGroupMap.values.filter { $0.count >= 2 }.flatMap { $0 }.map { $0.id })
+
+        func isTrump(_ c: Card) -> Bool { CardComparator.isTrump(c, trumpSuit: ts, trumpRank: tr) }
+        func isAce(_ c: Card)   -> Bool { c.rank == .ace && !isTrump(c) }
+        func isPaired(_ c: Card) -> Bool { pairedIDs.contains(c.id) }
+
+        // 垫底牌优先级（数字越小越优先放入底牌）：
+        // 0: 非主·非A·散牌·无分   1: 非主·非A·散牌·有分
+        // 2: 非主·非A·配对·无分   3: 非主·非A·配对·有分
+        // 4: 非主·A（尽量保留）   5: 主牌·散牌   6: 主牌·配对（最不想动）
+        func tier(_ c: Card) -> Int {
+            if isTrump(c)  { return isPaired(c) ? 6 : 5 }
+            if isAce(c)    { return 4 }
+            if isPaired(c) { return c.pointValue > 0 ? 3 : 2 }
+            return c.pointValue > 0 ? 1 : 0
         }
 
-        let kittyCards = Array(nonTrump.prefix(8))
+        let sorted = hand.sorted { a, b in
+            let ta = tier(a), tb = tier(b)
+            if ta != tb { return ta < tb }
+            // 同 tier 内：无分优先，再按 rank 升序（小牌先进底）
+            if a.pointValue != b.pointValue { return a.pointValue < b.pointValue }
+            return a.rank.rawValue < b.rank.rawValue
+        }
+
+        let kittyCards = Array(sorted.prefix(8))
         let kittyIDs   = Set(kittyCards.map { $0.id })
         state.kitty    = kittyCards
         player.hand.removeAll { kittyIDs.contains($0.id) }
@@ -634,13 +664,23 @@ class GameEngine: ObservableObject {
         state.roundNumber += 1   // 局结束后自增，之后亮主不再换庄
         state.phase = .roundEnd
 
-        let kittyPoints  = state.kitty.reduce(0) { $0 + $1.pointValue }
-        let lastWinner   = makeEvaluator().winner(of: state.completedTricks.last!)
+        let evaluator    = makeEvaluator()
+        let kittyCards   = state.kitty
+        let kittyPoints  = kittyCards.reduce(0) { $0 + $1.pointValue }
+        let lastTrick    = state.completedTricks.last!
+        let lastWinner   = evaluator.winner(of: lastTrick)
         var finalScore   = state.attackScore
 
+        // 计算底牌翻倍系数（由最后一墩先手牌型决定）
+        let multiplier   = kittyMultiplier(lastTrickLeadCards: lastTrick.plays.first?.cards ?? [],
+                                           evaluator: evaluator)
+
+        var rawKittyPts  = 0
         if lastWinner.team == state.attackTeamIdx {
-            finalScore += kittyPoints * 2
-            state.message = "攻方吃底牌 x2，+\(kittyPoints * 2) 分"
+            rawKittyPts   = kittyPoints
+            let bonus     = kittyPoints * multiplier
+            finalScore   += bonus
+            state.message = "攻方吃底牌 ×\(multiplier)，+\(bonus) 分"
         } else {
             state.message = "庄家方保底"
         }
@@ -663,7 +703,10 @@ class GameEngine: ObservableObject {
             attackScore: finalScore,
             attackTeamWon: attackWon,
             levelAdvance: dealerAdvance,
-            attackAdvance: attackAdvance
+            attackAdvance: attackAdvance,
+            kittyCards: kittyCards,
+            kittyMultiplier: multiplier,
+            rawKittyPoints: rawKittyPts
         )
 
         if attackWon {
@@ -683,6 +726,29 @@ class GameEngine: ObservableObject {
             state.phase = .gameOver
         }
         syncMultiplayerState()
+    }
+
+    /// 根据最后一墩先手牌型计算底牌翻倍系数：
+    /// 单张→×2，对子→×4，连对（N对=2N张）→×(2N×2)，甩牌→取各组件最大值
+    private func kittyMultiplier(lastTrickLeadCards: [Card], evaluator: TrickEvaluator) -> Int {
+        let count = lastTrickLeadCards.count
+        guard count > 0 else { return 2 }
+
+        if count == 1 { return 2 }
+
+        // 甩牌（混合牌型）：取最大分支
+        if let slam = evaluator.slamInfo(of: lastTrickLeadCards) {
+            var m = 2
+            for tractor in slam.tractors { m = max(m, tractor.count * 2) }
+            if !slam.pairs.isEmpty { m = max(m, 4) }
+            return m
+        }
+
+        // 纯对子
+        if count == 2 { return 4 }
+
+        // 纯连对（slamInfo==nil 且 count>=4 偶数）
+        return count * 2
     }
 
     private func advanceLevel(team: Int, steps: Int) {
