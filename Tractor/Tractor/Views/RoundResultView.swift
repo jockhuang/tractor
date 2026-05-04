@@ -21,23 +21,6 @@ struct RoundResultView: View {
                     // 底牌展示
                     kittySection
 
-                    // 得分详情
-                    VStack(spacing: 10) {
-                        scoreRow(label: "攻方得分", value: "\(result.attackScore) 分",
-                                 note: result.attackScore >= 80 ? "≥80 分，赢" : "<80 分，输")
-
-                        Divider().background(Color.white.opacity(0.3))
-
-                        if result.attackTeamWon {
-                            upgradeRow(label: "攻方升级", steps: result.attackAdvance)
-                        } else {
-                            upgradeRow(label: "庄家方升级", steps: result.levelAdvance)
-                        }
-                    }
-                    .padding(16)
-                    .background(Color.white.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-
                     // 当前级别
                     HStack(spacing: 32) {
                         teamLevel(name: "南北", team: 0)
@@ -113,8 +96,10 @@ struct RoundResultView: View {
                             CardView(card: card, isSmall: true)
                         }
                     }
-                    .padding(.vertical, 4)
+                    .padding(.top, 10)
+                    .padding(.bottom, 6)
                 }
+                .frame(height: 86)
             }
         }
         .padding(12)

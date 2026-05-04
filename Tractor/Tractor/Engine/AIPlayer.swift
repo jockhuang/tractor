@@ -208,37 +208,57 @@ struct AIPlayer {
             return pair
         }
 
-        // ── 5. 非主散牌（无分优先，再有分）──────────────────
-        // 在迫不得已出主牌前，先领出非主花色的真正散牌（不拆对子）
-        // 无分非主散牌优先；若全是分牌则也先领非主而不动主牌
-        let nonPairedSideNonPoint = leadableSingletons(from: hand, isTrump: false, pointOnly: false,
-                                                        trumpSuit: ts, trumpRank: tr)
-        if let card = nonPairedSideNonPoint.first { return [card] }
-        let nonPairedSideAny = leadableSingletons(from: hand, isTrump: false, pointOnly: nil,
-                                                   trumpSuit: ts, trumpRank: tr)
-        if let card = nonPairedSideAny.first { return [card] }
-
-        // ── 6. 主牌对子（无分优先，再取最弱对子）────────────
-        if let trumpPair = findWeakestTrumpPair(in: hand, nonPointFirst: true,
-                                                trumpSuit: ts, trumpRank: tr) {
-            return trumpPair
+        // ── 5. 队友绝花色且该花色有分未出 → 引出队友垫分 ────
+        // 找队友位置，检查队友已绝的花色里哪些还有分牌未出
+        // 领出该花色让队友把手中分牌垫给我们
+        if let partnerPos = PlayerPosition.allCases.first(where: { $0.team == myTeam && $0 != position }) {
+            // 收集候选：队友已绝 & 该花色有分未出 & AI手中有该花色牌
+            var candidates: [(strongest: Card, suitCards: [Card])] = []
+            for suit in Suit.allCases {
+                let key = suit.rawValue
+                guard ctx.isVoid(partnerPos, key: key) else { continue }
+                guard ctx.unplayedSuitPoints(suit: suit, tr: tr) > 0 else { continue }
+                let sc = sideCards.filter { $0.suit == suit }
+                guard let strongest = sc.max(by: {
+                    CardComparator.beats($1, $0, trumpSuit: ts, trumpRank: tr)
+                }) else { continue }
+                candidates.append((strongest: strongest, suitCards: sc))
+            }
+            // 从候选中选最强的花色
+            if let best = candidates.max(by: {
+                CardComparator.beats($1.strongest, $0.strongest, trumpSuit: ts, trumpRank: tr)
+            }) {
+                // 有对子则出对子
+                if let p = pairs(in: best.suitCards, trumpSuit: ts, trumpRank: tr)
+                    .max(by: { weakerPair($0, than: $1, trumpSuit: ts, trumpRank: tr) }) {
+                    return p
+                }
+                return [best.strongest]
+            }
         }
 
-        // ── 7. 最小主牌（无分优先，不拆对子）────────────────
-        let trumps = hand.filter { CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr) }
-        // 先在无配对的主牌中找最弱无分牌
+        // ── 6. 小主牌（无分孤张优先，再有分，再最弱主对）────
         if let card = leadableSingletons(from: hand, isTrump: true, pointOnly: false,
-                                         trumpSuit: ts, trumpRank: tr).first {
-            return [card]
-        }
-        // 退而求其次：无配对的主牌中最弱（含分）
+                                         trumpSuit: ts, trumpRank: tr).first { return [card] }
         if let card = leadableSingletons(from: hand, isTrump: true, pointOnly: nil,
-                                         trumpSuit: ts, trumpRank: tr).first {
-            return [card]
-        }
-        // 再退：有配对的主牌最弱无分
-        if let card = weakestNonPointFirst(from: trumps, count: 1, trumpSuit: ts, trumpRank: tr).first {
-            return [card]
+                                         trumpSuit: ts, trumpRank: tr).first { return [card] }
+        if let p = findWeakestTrumpPair(in: hand, nonPointFirst: true,
+                                         trumpSuit: ts, trumpRank: tr) { return p }
+
+        // ── 7. 主牌不多时，改从副牌中出较大的 ──────────────
+        // 当手中主牌 ≤ 3 张时，主动领副牌大牌以尽量赢墩
+        let trumpCount = hand.filter { CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr) }.count
+        if trumpCount <= 3, !sideCards.isEmpty {
+            // 按牌力从大到小排，选最强非主牌（忽略是否已是最大）
+            let strongest = sideCards.sorted {
+                CardComparator.beats($0, $1, trumpSuit: ts, trumpRank: tr)
+            }
+            // 有对子则出对子（强对）
+            if let p = pairs(in: sideCards, trumpSuit: ts, trumpRank: tr)
+                .max(by: { weakerPair($0, than: $1, trumpSuit: ts, trumpRank: tr) }) {
+                return p
+            }
+            if let card = strongest.first { return [card] }
         }
 
         // ── 8. 最弱牌（最后兜底）────────────────────────────
@@ -283,7 +303,9 @@ struct AIPlayer {
         let partnerWinning = currentWinner.team == position.team
         let enemyWinning   = !partnerWinning
 
-        let suitCards = hand.filter { evaluator.cardSuit($0) == leadSuit }
+        let suitCards  = hand.filter { evaluator.cardSuit($0) == leadSuit }
+        let trickPoints = state.currentTrick.plays
+            .flatMap { $0.cards }.reduce(0) { $0 + $1.pointValue }
 
         // ── 连对 ────────────────────────────────────────────
         if let leadTractor = tractorInfo(of: leadCards, trumpSuit: ts, trumpRank: tr) {
@@ -312,6 +334,7 @@ struct AIPlayer {
                 trumpRank: tr,
                 position: position,
                 leadSuit: leadSuit,
+                trickPoints: trickPoints,
                 ctx: ctx
             )
         }
@@ -359,7 +382,30 @@ struct AIPlayer {
             if remaining > 0 {
                 let extra = hand.filter { evaluator.cardSuit($0) != leadSuit }
 
-                // 绝牌后额外出牌策略（考虑是否出主/垫分）
+                // ── 对方大 + 本墩有分 → 主动压牌（优先截胡）──────
+                if enemyWinning && trickPoints > 0 {
+                    let winRep = maxCard(in: winningCards, ts: ts, tr: tr)
+                    // 找最弱的能压赢的牌（主牌优先能压非主赢家）
+                    let canBeatExtra = extra.filter {
+                        CardComparator.beats($0, winRep, trumpSuit: ts, trumpRank: tr)
+                    }.sorted { weakerCard($0, than: $1, trumpSuit: ts, trumpRank: tr) }
+                    if !canBeatExtra.isEmpty {
+                        chosen += Array(canBeatExtra.prefix(remaining))
+                        // 若还需凑牌（多张跟牌场景），垫分给自己
+                        if chosen.count < count {
+                            let ids = Set(chosen.map { $0.id })
+                            let rest = hand.filter { !ids.contains($0.id) }
+                            chosen += smartDiscard(
+                                from: rest, count: count - chosen.count,
+                                enemyWinning: false,   // 我方已压住，按队友赢策略垫分
+                                ts: ts, tr: tr, myTeam: position.team, ctx: ctx
+                            )
+                        }
+                        return Array(chosen.prefix(count))
+                    }
+                }
+
+                // 绝牌后常规策略（考虑是否出主/垫分）
                 let fills = voidFillCards(
                     extra: extra, remaining: remaining,
                     leadSuit: leadSuit,
@@ -631,8 +677,11 @@ struct AIPlayer {
         trumpRank: Rank,
         position: PlayerPosition,
         leadSuit: Suit?,
+        trickPoints: Int,
         ctx: AIContext
     ) -> [Card] {
+        let enemyWinning = !partnerWinning
+
         if suitCards.count >= 2 {
             let availablePairs = pairs(in: suitCards, trumpSuit: trumpSuit, trumpRank: trumpRank)
 
@@ -665,19 +714,24 @@ struct AIPlayer {
                                 trumpSuit: trumpSuit, trumpRank: trumpRank)
         }
 
-        if suitCards.isEmpty,
-           !partnerWinning,
-           let winningPair = pairRepresentative(of: winningCards,
-                                               trumpSuit: trumpSuit, trumpRank: trumpRank) {
-            let beating = pairs(in: hand, trumpSuit: trumpSuit, trumpRank: trumpRank)
+        // ── 绝牌（无同花色）路径 ─────────────────────────────────────
+
+        // 尝试用全手牌中的对子压赢者
+        if suitCards.isEmpty, enemyWinning {
+            let winRep = maxCard(in: winningCards, ts: trumpSuit, tr: trumpRank)
+            let canBeatPairs = pairs(in: hand, trumpSuit: trumpSuit, trumpRank: trumpRank)
                 .filter { p in
                     guard let rep = pairRepresentative(of: p, trumpSuit: trumpSuit,
                                                        trumpRank: trumpRank) else { return false }
-                    return CardComparator.beats(rep, winningPair,
+                    return CardComparator.beats(rep, winRep,
                                                trumpSuit: trumpSuit, trumpRank: trumpRank)
                 }
                 .sorted { weakerPair($0, than: $1, trumpSuit: trumpSuit, trumpRank: trumpRank) }
-            if let p = beating.first { return p }
+
+            // 对方大 + 本墩有分：只要有能赢的对子就出
+            if let p = canBeatPairs.first, trickPoints > 0 {
+                return p
+            }
         }
 
         let usedIDs = Set(suitCards.map { $0.id })
