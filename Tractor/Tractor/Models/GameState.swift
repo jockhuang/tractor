@@ -76,6 +76,7 @@ class GameState: ObservableObject {
     // 发牌进度
     @Published var dealtCount: Int = 0         // 已发出的牌数 (0-100)
     @Published var isDealingFast: Bool = false  // 快速发牌开关
+    @Published var lastDrawnCardId: UUID? = nil // 发牌动画：最近一张发给本家的牌
 
     // 庄家位置（每局开始时确定）
     @Published var dealerPosition: PlayerPosition = .south
@@ -137,6 +138,7 @@ class GameState: ObservableObject {
         trumpDeclaration  = nil
         dealtCount        = 0
         isDealingFast     = false
+        lastDrawnCardId   = nil
         forcedFollowCards   = [:]
         postDealCountdown   = 0
         for p in players { p.hand = []; p.isDealer = false }

@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AA11223344556677889900BB /* SoundManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11223344556677889900AA /* SoundManager.swift */; };
+		CC11223344556677889900DD /* poker_card_draw_sound.wav in Resources */ = {isa = PBXBuildFile; fileRef = CC11223344556677889900CC /* poker_card_draw_sound.wav */; };
+		EE11223344556677889900FF /* card_slap_on_table.wav in Resources */ = {isa = PBXBuildFile; fileRef = EE11223344556677889900EE /* card_slap_on_table.wav */; };
+		1111223344556677889900AA /* game_victory_sound.wav in Resources */ = {isa = PBXBuildFile; fileRef = 1111223344556677889900BB /* game_victory_sound.wav */; };
+		2222334455667788990011CC /* game_over_sound.wav in Resources */ = {isa = PBXBuildFile; fileRef = 2222334455667788990011DD /* game_over_sound.wav */; };
 		8FE9E5F3FF2FB847882F37B2 /* TractorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95D202B73DE64F6C7959E5A6 /* TractorApp.swift */; };
 		7F4BB21E8B4B2CE059FAD509 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 152D3A87DFF7600785C9B431 /* ContentView.swift */; };
 		F7A77112F7889361098812F4 /* Card.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5513BD913D4ECE1D2EC86200 /* Card.swift */; };
@@ -54,6 +59,11 @@
 		A97C29AD63741CF438998CE6 /* Tractor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Tractor.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		BCE6FDA953C788095A46F543 /* DealingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DealingView.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6A7B8C9D0E1F2A3 /* TrickHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrickHistoryView.swift; sourceTree = "<group>"; };
+		AA11223344556677889900AA /* SoundManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundManager.swift; sourceTree = "<group>"; };
+		CC11223344556677889900CC /* poker_card_draw_sound.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = poker_card_draw_sound.wav; sourceTree = "<group>"; };
+		EE11223344556677889900EE /* card_slap_on_table.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = card_slap_on_table.wav; sourceTree = "<group>"; };
+		1111223344556677889900BB /* game_victory_sound.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = game_victory_sound.wav; sourceTree = "<group>"; };
+		2222334455667788990011DD /* game_over_sound.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = game_over_sound.wav; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -92,6 +102,10 @@
 				78EF4B0EA3FDA2A792BCF074 /* Views */,
 				671E5B54412D9F8033A8454C /* Assets.xcassets */,
 				0A929019CD960CE95E5D54A9 /* Info.plist */,
+				CC11223344556677889900CC /* poker_card_draw_sound.wav */,
+				EE11223344556677889900EE /* card_slap_on_table.wav */,
+				1111223344556677889900BB /* game_victory_sound.wav */,
+				2222334455667788990011DD /* game_over_sound.wav */,
 			);
 			path = Tractor;
 			sourceTree = "<group>";
@@ -124,6 +138,7 @@
 				CFBC7A8976E032FC4F3B7CAD /* GameEngine.swift */,
 				430E2C1FD0EDE7513C6AA059 /* AIPlayer.swift */,
 				63D879AC0F3F4A45B6B75612 /* LANMultiplayerManager.swift */,
+				AA11223344556677889900AA /* SoundManager.swift */,
 			);
 			path = Engine;
 			sourceTree = "<group>";
@@ -204,6 +219,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				F7B235559E4A7603B1BBD6F2 /* Assets.xcassets in Resources */,
+				CC11223344556677889900DD /* poker_card_draw_sound.wav in Resources */,
+				EE11223344556677889900FF /* card_slap_on_table.wav in Resources */,
+				1111223344556677889900AA /* game_victory_sound.wav in Resources */,
+				2222334455667788990011CC /* game_over_sound.wav in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -234,6 +253,7 @@
 				50DDA9FB6CFEFD5588916417 /* GameBoardView.swift in Sources */,
 				B95FF48B976B4685DF6ED2F6 /* DealingView.swift in Sources */,
 				A1B2C3D4E5F6A7B8C9D0E1F2 /* TrickHistoryView.swift in Sources */,
+				AA11223344556677889900BB /* SoundManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -12,6 +12,7 @@ class GameEngine: ObservableObject {
     private var aiDelay: TimeInterval = 1.2
     private var trickEndDelay: TimeInterval = 1.5
     private var stateCancellable: AnyCancellable?
+    private var phaseCancellable: AnyCancellable?
     private var dealingTask: Task<Void, Never>?
     let multiplayer = LANMultiplayerManager()
     @Published var localPosition: PlayerPosition = .south
@@ -27,6 +28,7 @@ class GameEngine: ObservableObject {
     private func subscribeToState() {
         stateCancellable = state.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
+
     }
 
     // MARK: - 开始游戏 / 新局
@@ -91,8 +93,19 @@ class GameEngine: ObservableObject {
 
             withAnimation(.spring(response: 0.15, dampingFraction: 0.8)) {
                 state.player(pos).hand.append(card)
+                // 实时排序：同花色聚拢，级牌/Joker 靠左
+                state.player(pos).sortHand(trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
+            }
+            // 记录本家最新拿到的牌 ID，用于高亮浮起效果
+            if pos == localPosition {
+                state.lastDrawnCardId = card.id
             }
             state.dealtCount = i + 1
+
+            // 每 4 张播放一次抓牌音效（避免快速模式下声音堆叠）
+            if i % 4 == 0 {
+                SoundManager.shared.playCardDraw()
+            }
 
             // AI 在收到牌后考虑亮主
             if !humanControlledPositions.contains(pos) {
@@ -114,10 +127,12 @@ class GameEngine: ObservableObject {
         state.dealtCount = 100
         syncMultiplayerState()
 
-        // 排序手牌
+        // 最终排序（主牌已确认，消除亮主后的位置偏差）
         for pos in order {
             state.player(pos).sortHand(trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
         }
+        // 清除发牌高亮
+        state.lastDrawnCardId = nil
 
         try? await Task.sleep(nanoseconds: 300_000_000)
         if Task.isCancelled { return }
@@ -353,16 +368,39 @@ class GameEngine: ObservableObject {
             }
         }
 
+        // ── 反无主限制（cur == 0）：需要手中 ≥3 张 A 且 ≥3 对子（含连对）──
+        // 避免手牌不够强时轻率开主，让对手轻松反掉
+        if cur == 0 {
+            let aceCount = hand.filter { $0.rank == .ace }.count
+            var pairGroupMap: [String: Int] = [:]
+            for card in hand {
+                let key = CardComparator.pairKey(card, trumpSuit: state.trumpSuit, trumpRank: tr)
+                pairGroupMap[key, default: 0] += 1
+            }
+            let pairCount = pairGroupMap.values.filter { $0 >= 2 }.count
+            guard aceCount >= 3 && pairCount >= 3 else { return }
+        }
+
         // ── 优先宣告对子 ──────────────────────────────
         if let best = counts.filter({ $0.value >= 2 && meetsThreshold($0.value) })
                             .max(by: { $0.value < $1.value }) {
             if cur < 2 {
+                // 反不同花色限制：新花色级牌数必须严格大于当前声明数
+                // 或数量相同时，新花色对子数多于当前声明隐含的对子数
+                if cur > 0, state.trumpDeclaration?.suit != best.key {
+                    let newCount  = best.value
+                    let newPairs  = newCount / 2
+                    let curPairs  = cur == 2 ? 1 : 0   // cur==1→单张0对; cur==2→1对
+                    guard newCount > cur || (newCount == cur && newPairs > curPairs) else {
+                        return
+                    }
+                }
                 applyDeclaration(position: position, suit: best.key, strength: 2)
             }
             return
         }
 
-        // ── 单张亮主（无人亮主时）────────────────────
+        // ── 单张亮主（无人亮主时，须满足反无主限制，已在上方检查）────
         if cur == 0,
            let best = counts.filter({ meetsThreshold($0.value) })
                             .max(by: { $0.value < $1.value }) {
@@ -588,6 +626,7 @@ class GameEngine: ObservableObject {
     }
 
     private func performPlay(position: PlayerPosition, cards: [Card]) {
+        SoundManager.shared.playCardSlap()
         state.player(position).play(cards: cards)
         state.currentTrick.plays.append((position: position, cards: cards))
         state.selectedCards = []
@@ -602,6 +641,20 @@ class GameEngine: ObservableObject {
                 }
             } else {
                 analyzeSlamLead(position: position, cards: cards)
+            }
+            // 领出语音播报
+            let announcement = makeEvaluator().leadAnnouncement(cards: cards)
+            SoundManager.shared.speakLead(announcement)
+        }
+
+        // 跟牌：先手是副牌，且出主牌后自己成为赢家（真正将吃）才播报"毙"
+        if state.currentTrick.plays.count > 1 {
+            let evaluator = makeEvaluator()
+            let leadCards = state.currentTrick.plays[0].cards
+            if evaluator.dominantSuit(of: leadCards) != nil,          // 先手是副牌
+               evaluator.dominantSuit(of: cards) == nil,              // 当前出的是主牌
+               evaluator.winner(of: state.currentTrick) == position { // 出牌后自己是赢家
+                SoundManager.shared.speakLead("毙")
             }
         }
 
@@ -689,6 +742,10 @@ class GameEngine: ObservableObject {
         let attackWon   = finalScore >= threshold
         state.attackScore = finalScore
 
+        // 在 dealerTeamIdx 被修改之前确定本局胜负，用于音效
+        let localIsAttack = localPosition.team == state.attackTeamIdx
+        let localWon      = localIsAttack ? attackWon : !attackWon
+
         var dealerAdvance = 0
         var attackAdvance = 0
 
@@ -725,6 +782,14 @@ class GameEngine: ObservableObject {
            teamLevelRank(state.attackTeamIdx) == .ace {
             state.phase = .gameOver
         }
+
+        // 每局结束播放胜负音效（localWon 在 dealerTeamIdx 改变前已算好）
+        if localWon {
+            SoundManager.shared.playVictory()
+        } else {
+            SoundManager.shared.playGameOver()
+        }
+
         syncMultiplayerState()
     }
 

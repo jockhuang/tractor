@@ -6,6 +6,7 @@ struct PlayerHandView: View {
     var isActive: Bool = false
     var canSelect: Bool = true
     var maxVisible: Int = 25
+    var lastDrawnCardId: UUID? = nil  // 发牌动画：最新一张牌浮起
 
     private let cardWidth: CGFloat = 64
     private let cardHeight: CGFloat = 90
@@ -24,7 +25,8 @@ struct PlayerHandView: View {
                         card: card,
                         isSelected: selectedCards.contains(card.id)
                     )
-                    .offset(y: selectedCards.contains(card.id) ? -12 : 0)
+                    .offset(y: selectedCards.contains(card.id) ? -12
+                               : (card.id == lastDrawnCardId ? -10 : 0))
                     .onTapGesture {
                         if canSelect && isActive {
                             withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) {

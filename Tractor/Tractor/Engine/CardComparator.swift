@@ -68,7 +68,41 @@ struct CardComparator {
             == pairOrderValue(lower, trumpSuit: trumpSuit, trumpRank: trumpRank) + 1
     }
 
-    // MARK: - 手牌排序（主牌最左，其余按花色分组）
+    // MARK: - 手牌排序（主牌最左，其余按花色黑红相间分组）
+
+    /// 非主牌花色显示顺序：确保相邻花色黑红交替，且第一个非主花色与主牌颜色相反
+    static func nonTrumpSuitOrder(trumpSuit: Suit?) -> [Suit] {
+        let all: [Suit] = [.spades, .hearts, .clubs, .diamonds]
+        let remaining = all.filter { $0 != trumpSuit }
+        let blacks = remaining.filter { $0 == .spades || $0 == .clubs }
+        let reds   = remaining.filter { $0 == .hearts || $0 == .diamonds }
+
+        // 起始颜色：与主牌颜色相反，避免主牌组和紧邻的非主花色组同色相邻
+        // 无主牌时按数量多的先放
+        let trumpIsBlack = trumpSuit == .spades || trumpSuit == .clubs
+        let trumpIsRed   = trumpSuit == .hearts  || trumpSuit == .diamonds
+        let startBlack: Bool
+        if trumpIsBlack {
+            startBlack = reds.isEmpty   // 主黑 → 非主先放红；若无红才放黑
+        } else if trumpIsRed {
+            startBlack = !blacks.isEmpty // 主红 → 非主先放黑；若无黑才放红
+        } else {
+            startBlack = blacks.count >= reds.count
+        }
+
+        var result: [Suit] = []
+        var bi = 0, ri = 0
+        while bi < blacks.count || ri < reds.count {
+            if startBlack {
+                if bi < blacks.count { result.append(blacks[bi]); bi += 1 }
+                if ri < reds.count   { result.append(reds[ri]);   ri += 1 }
+            } else {
+                if ri < reds.count   { result.append(reds[ri]);   ri += 1 }
+                if bi < blacks.count { result.append(blacks[bi]); bi += 1 }
+            }
+        }
+        return result
+    }
 
     static func handSortOrder(_ a: Card, _ b: Card, trumpSuit: Suit?, trumpRank: Rank) -> Bool {
         let aT = isTrump(a, trumpSuit: trumpSuit, trumpRank: trumpRank)
@@ -87,8 +121,8 @@ struct CardComparator {
             return aSuit < bSuit
         }
 
-        // 都不是主牌：先按花色分，再按大小
-        let suitOrder: [Suit] = [.spades, .hearts, .clubs, .diamonds]
+        // 都不是主牌：按黑红相间的动态花色顺序排，同花色内按大小
+        let suitOrder = nonTrumpSuitOrder(trumpSuit: trumpSuit)
         let aSuit = a.suit ?? .spades
         let bSuit = b.suit ?? .spades
         if aSuit != bSuit {
