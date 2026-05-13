@@ -340,6 +340,15 @@ class GameEngine: ObservableObject {
             let bigCount   = hand.filter { $0.rank == .bigJoker }.count
             let smallCount = hand.filter { $0.rank == .smallJoker }.count
             if bigCount >= 2 || smallCount >= 2 {
+                // 对王反无主限制：需要手中 ≥3 张 A 且 ≥3 对子（含连对），手牌强度足够才值得打无主
+                let aceCount = hand.filter { $0.rank == .ace }.count
+                var pairGroupMap: [String: Int] = [:]
+                for card in hand {
+                    let key = CardComparator.pairKey(card, trumpSuit: state.trumpSuit, trumpRank: tr)
+                    pairGroupMap[key, default: 0] += 1
+                }
+                let pairCount = pairGroupMap.values.filter { $0 >= 2 }.count
+                guard aceCount >= 3 && pairCount >= 3 else { return }
                 applyDeclaration(position: position, suit: nil, strength: 3)
                 return
             }
@@ -368,25 +377,12 @@ class GameEngine: ObservableObject {
             }
         }
 
-        // ── 反无主限制（cur == 0）：需要手中 ≥3 张 A 且 ≥3 对子（含连对）──
-        // 避免手牌不够强时轻率开主，让对手轻松反掉
-        if cur == 0 {
-            let aceCount = hand.filter { $0.rank == .ace }.count
-            var pairGroupMap: [String: Int] = [:]
-            for card in hand {
-                let key = CardComparator.pairKey(card, trumpSuit: state.trumpSuit, trumpRank: tr)
-                pairGroupMap[key, default: 0] += 1
-            }
-            let pairCount = pairGroupMap.values.filter { $0 >= 2 }.count
-            guard aceCount >= 3 && pairCount >= 3 else { return }
-        }
-
         // ── 优先宣告对子 ──────────────────────────────
         if let best = counts.filter({ $0.value >= 2 && meetsThreshold($0.value) })
                             .max(by: { $0.value < $1.value }) {
             if cur < 2 {
-                // 反不同花色限制：新花色级牌数必须严格大于当前声明数
-                // 或数量相同时，新花色对子数多于当前声明隐含的对子数
+                // 反不同花色限制（已有亮主时）：新花色级牌数须严格大于当前声明数；
+                // 数量相同时须有更多对子；都相同则不反
                 if cur > 0, state.trumpDeclaration?.suit != best.key {
                     let newCount  = best.value
                     let newPairs  = newCount / 2
@@ -400,7 +396,7 @@ class GameEngine: ObservableObject {
             return
         }
 
-        // ── 单张亮主（无人亮主时，须满足反无主限制，已在上方检查）────
+        // ── 单张亮主（原规则：仅须满足发牌进度门槛，无额外手牌限制）────
         if cur == 0,
            let best = counts.filter({ meetsThreshold($0.value) })
                             .max(by: { $0.value < $1.value }) {
