@@ -5,6 +5,7 @@ struct MenuView: View {
 
     @State private var showRules = false
     @State private var showLobby = false
+    @State private var soundEnabled = SoundManager.shared.soundEnabled
 
     var body: some View {
         ZStack {
@@ -97,13 +98,37 @@ struct MenuView: View {
             }
             .padding(.vertical, 12)
 
-            // 底部版本号
+            // 底部：版本号 + 音效开关
             VStack {
                 Spacer()
-                Text("版本 1.0  ·  南北 vs 东西")
-                    .font(.caption)
-                    .foregroundColor(.white.opacity(0.4))
-                    .padding(.bottom, 8)
+                HStack {
+                    Text("版本 1.0  ·  南北 vs 东西")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.4))
+
+                    Spacer()
+
+                    // 音效开关
+                    Button(action: {
+                        soundEnabled.toggle()
+                        SoundManager.shared.soundEnabled = soundEnabled
+                        if !soundEnabled { SoundManager.shared.stopAll() }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: soundEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                                .font(.system(size: 12))
+                            Text(soundEnabled ? "音效开" : "音效关")
+                                .font(.caption)
+                        }
+                        .foregroundColor(soundEnabled ? .white.opacity(0.7) : .white.opacity(0.35))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.white.opacity(0.08))
+                        .clipShape(Capsule())
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
             }
         }
         .sheet(isPresented: $showRules) {

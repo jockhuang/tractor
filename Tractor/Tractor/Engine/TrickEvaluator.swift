@@ -54,6 +54,39 @@ struct TrickEvaluator {
             }
         }
 
+        // 先手甩牌：同花色足够时也必须满足结构优先级（连对 > 对子 > 散牌）
+        if let slam = slamInfo(of: leadCards) {
+            return validateSlamFollow(selectedSuit: selectedSuit,
+                                      suitCards: suitCardsInHand, slam: slam)
+        }
+
+        return true
+    }
+
+    /// 验证跟甩牌时同花色牌的结构合法性
+    /// 规则：甩牌含对子/连对时，同花色必须先贡献对子（含连对），才能出散牌
+    private func validateSlamFollow(selectedSuit: [Card], suitCards: [Card], slam: SlamInfo) -> Bool {
+        // 甩牌的总对子槽数（连对各对 + 孤立对子数）
+        let slamPairSlots = slam.tractors.reduce(0) { $0 + $1.count / 2 } + slam.pairs.count
+        guard slamPairSlots > 0 else { return true }   // 纯散牌甩牌，无对子要求
+
+        let handTotalPairs = pairs(in: suitCards).count
+        let requiredPairs  = min(handTotalPairs, slamPairSlots)
+        guard requiredPairs > 0 else { return true }   // 手中同花色无对子，无需检查
+
+        // 已选牌中的对子数 >= 需贡献的最少对子数
+        guard pairs(in: selectedSuit).count >= requiredPairs else { return false }
+
+        // 连对槽优先：甩牌含连对时，手中有连对必须先出连对
+        let slamTractorPairSlots = slam.tractors.reduce(0) { $0 + $1.count / 2 }
+        if slamTractorPairSlots > 0 {
+            let handTractorPairs     = tractorPairCount(in: suitCards)
+            let requiredTractorPairs = min(handTractorPairs, slamTractorPairSlots)
+            if requiredTractorPairs > 0 {
+                guard tractorPairCount(in: selectedSuit) >= requiredTractorPairs else { return false }
+            }
+        }
+
         return true
     }
 
@@ -162,17 +195,24 @@ struct TrickEvaluator {
 
         // ── 先手出单牌（含甩牌）──────────────────────────────────────
 
-        // 甩牌先手：将牌将吃必须牌型完全匹配甩牌结构（连对/对子/单张数均一致），否则视为垫牌
+        // 甩牌先手：将牌压甩牌的资格规则
+        //   - 甩牌含对子/连对：主牌结构必须与甩牌完全一致才能将吃
+        //   - 甩牌纯散牌：任意主牌均可将吃
         if let slam = slamInfo(of: leadCards) {
-            // 副牌无法压甩牌（甩牌者始终是副牌赢家）
-            guard candidateSuit == nil else { return false }
-            // 将牌牌型必须与甩牌结构完全匹配，否则是垫牌
-            guard trumpMatchesSlamStructure(cards, slam: slam) else { return false }
-            // 候选合格：若当前赢家是副牌（甩牌者），直接胜出
+            // 将吃的第一必要条件：出的牌必须全部是主牌（只看第一张不够，逐张验证）
+            guard cards.allSatisfy({ cardSuit($0) == nil }) else { return false }
+            // 甩牌含对子或连对时，主牌结构必须完全匹配才有资格将吃
+            let slamHasPairsOrTractors = !slam.pairs.isEmpty || !slam.tractors.isEmpty
+            if slamHasPairsOrTractors {
+                guard trumpMatchesSlamStructure(cards, slam: slam) else { return false }
+            }
+            // 候选合格；若当前赢家是副牌（甩牌者），直接胜出
             if winningSuit != nil { return true }
-            // 当前赢家也是将牌：验证其资格，再按结构层级比大小
-            guard trumpMatchesSlamStructure(winningCards, slam: slam) else { return true }
-            return slamTrumpBeats(cards, over: winningCards)
+            // 当前赢家也是将牌：同样验证其资格，再按结构层级比大小
+            if slamHasPairsOrTractors {
+                guard trumpMatchesSlamStructure(winningCards, slam: slam) else { return true }
+            }
+            return slamTrumpBeats(cards, over: winningCards, leadSlam: slam)
         }
 
         // 非甩牌单牌：将牌 > 副牌
@@ -188,73 +228,96 @@ struct TrickEvaluator {
     }
 
     /// 甩牌先手时，两个主牌出牌（suit 均为 nil）之间的结构比较
-    /// 优先级：最高连对（对数多者优先，同对数比高牌） > 最高对子 > 最高单张
-    private func slamTrumpBeats(_ candidate: [Card], over winner: [Card]) -> Bool {
+    ///
+    /// 比较层级由**领出甩牌的结构**决定，而非固定为"连对 > 对子 > 单张"：
+    /// - 领出含连对 → 先比最高连对，再比对子，再比单张
+    /// - 领出含对子（无连对）→ 先比最高对子，再比单张
+    /// - 领出纯散牌 → 仅比最高单张
+    ///
+    /// 例：北甩 Q♥10♥（纯散牌），东出 3♣3♣，南出大王+主K
+    /// → 领出无对子，只比最高单张：大王(100) > 3♣(70) → 南赢
+    private func slamTrumpBeats(_ candidate: [Card], over winner: [Card], leadSlam: SlamInfo) -> Bool {
         let cInfo = decomposeSlam(candidate, suit: nil)
         let wInfo = decomposeSlam(winner,    suit: nil)
 
-        // ① 比最高连对（先比对数，再比最高牌）
-        let cTopTractor = cInfo.tractors
-            .compactMap { tractorInfo(of: $0) }
-            .max { a, b in
-                a.pairCount != b.pairCount
-                    ? a.pairCount < b.pairCount
-                    : CardComparator.beats(b.highCard, a.highCard, trumpSuit: trumpSuit, trumpRank: trumpRank)
-            }
-        let wTopTractor = wInfo.tractors
-            .compactMap { tractorInfo(of: $0) }
-            .max { a, b in
-                a.pairCount != b.pairCount
-                    ? a.pairCount < b.pairCount
-                    : CardComparator.beats(b.highCard, a.highCard, trumpSuit: trumpSuit, trumpRank: trumpRank)
-            }
+        // ① 比最高连对（仅当领出含连对时才进行此层比较）
+        if !leadSlam.tractors.isEmpty {
+            let cTopTractor = cInfo.tractors
+                .compactMap { tractorInfo(of: $0) }
+                .max { a, b in
+                    a.pairCount != b.pairCount
+                        ? a.pairCount < b.pairCount
+                        : CardComparator.beats(b.highCard, a.highCard, trumpSuit: trumpSuit, trumpRank: trumpRank)
+                }
+            let wTopTractor = wInfo.tractors
+                .compactMap { tractorInfo(of: $0) }
+                .max { a, b in
+                    a.pairCount != b.pairCount
+                        ? a.pairCount < b.pairCount
+                        : CardComparator.beats(b.highCard, a.highCard, trumpSuit: trumpSuit, trumpRank: trumpRank)
+                }
 
-        if let cT = cTopTractor, let wT = wTopTractor {
-            if cT.pairCount != wT.pairCount { return cT.pairCount > wT.pairCount }
-            return CardComparator.beats(cT.highCard, wT.highCard, trumpSuit: trumpSuit, trumpRank: trumpRank)
-        } else if cTopTractor != nil { return true  }   // candidate 有连对，winner 无 → candidate 赢
-          else if wTopTractor != nil { return false }   // winner 有连对，candidate 无 → winner 保持
+            if let cT = cTopTractor, let wT = wTopTractor {
+                if cT.pairCount != wT.pairCount { return cT.pairCount > wT.pairCount }
+                return CardComparator.beats(cT.highCard, wT.highCard, trumpSuit: trumpSuit, trumpRank: trumpRank)
+            } else if cTopTractor != nil { return true  }
+              else if wTopTractor != nil { return false }
+        }
 
-        // ② 比最高对子
-        let cTopPair = cInfo.pairs
-            .compactMap { pairRepresentative(of: $0) }
-            .max { CardComparator.beats($1, $0, trumpSuit: trumpSuit, trumpRank: trumpRank) }
-        let wTopPair = wInfo.pairs
-            .compactMap { pairRepresentative(of: $0) }
-            .max { CardComparator.beats($1, $0, trumpSuit: trumpSuit, trumpRank: trumpRank) }
+        // ② 比最高对子（仅当领出含对子时才进行此层比较）
+        if !leadSlam.pairs.isEmpty {
+            let cTopPair = cInfo.pairs
+                .compactMap { pairRepresentative(of: $0) }
+                .max { CardComparator.beats($1, $0, trumpSuit: trumpSuit, trumpRank: trumpRank) }
+            let wTopPair = wInfo.pairs
+                .compactMap { pairRepresentative(of: $0) }
+                .max { CardComparator.beats($1, $0, trumpSuit: trumpSuit, trumpRank: trumpRank) }
 
-        if let cP = cTopPair, let wP = wTopPair {
-            return CardComparator.beats(cP, wP, trumpSuit: trumpSuit, trumpRank: trumpRank)
-        } else if cTopPair != nil { return true  }
-          else if wTopPair != nil { return false }
+            if let cP = cTopPair, let wP = wTopPair {
+                return CardComparator.beats(cP, wP, trumpSuit: trumpSuit, trumpRank: trumpRank)
+            } else if cTopPair != nil { return true  }
+              else if wTopPair != nil { return false }
+        }
 
-        // ③ 比最高单张
+        // ③ 比最高单张（领出含任何结构时均可作为最终决胜依据）
         let rep        = representativeCard(of: candidate)
         let winningRep = representativeCard(of: winner)
         return CardComparator.beats(rep, winningRep, trumpSuit: trumpSuit, trumpRank: trumpRank)
     }
 
-    /// 判断将牌出牌是否与甩牌结构完全匹配（连对组数/各组对数、孤立对子数、单张数均一致）
-    /// 只有完全匹配才有资格将吃，否则视为垫牌
+    /// 判断将牌出牌是否有资格将吃甩牌
+    ///
+    /// 规则（两个条件均须满足）：
+    ///   1. 甩牌中的每个连对，将牌必须有对数 ≥ 该连对的连对（不允许用孤立对子代替连对）
+    ///   2. 将牌的总「对子信用」≥ 甩牌的总「对子信用」
+    ///      对子信用 = 各连对的对数之和 + 孤立对子数
+    ///      （连对可以覆盖对子槽，故对数更多的连对可将吃只含孤立对子的甩牌）
     private func trumpMatchesSlamStructure(_ trumpCards: [Card], slam: SlamInfo) -> Bool {
         let trumpInfo = decomposeSlam(trumpCards, suit: nil)
 
-        // 连对组件：组数相同，且各组对数一一对应（排序后比较）
-        let slamTractorSizes  = slam.tractors
+        // 条件1：甩牌每个连对必须由将牌中对数 ≥ 它的连对覆盖（贪心：最大甩牌连对优先匹配）
+        let slamTractorSizes = slam.tractors
             .compactMap { tractorInfo(of: $0)?.pairCount }
-            .sorted()
-        let trumpTractorSizes = trumpInfo.tractors
+            .sorted(by: >)
+        var availableTrumpTractors = trumpInfo.tractors
             .compactMap { tractorInfo(of: $0)?.pairCount }
-            .sorted()
-        guard slamTractorSizes == trumpTractorSizes else { return false }
+            .sorted(by: >)
 
-        // 孤立对子数相同
-        guard trumpInfo.pairs.count == slam.pairs.count else { return false }
+        for slamSize in slamTractorSizes {
+            // 找最小的满足 trumpSize >= slamSize 的将牌连对（避免过度消耗大连对）
+            guard let idx = availableTrumpTractors.indices.last(where: {
+                availableTrumpTractors[$0] >= slamSize
+            }) else {
+                return false   // 无法为此甩牌连对找到匹配的将牌连对
+            }
+            availableTrumpTractors.remove(at: idx)
+        }
 
-        // 单张数相同
-        guard trumpInfo.singles.count == slam.singles.count else { return false }
+        // 条件2：将牌总对子信用 ≥ 甩牌总对子信用
+        let trumpPairCredits = trumpInfo.tractors.reduce(0) { $0 + $1.count / 2 } + trumpInfo.pairs.count
+        let slamPairCredits  = slam.tractors.reduce(0)  { $0 + $1.count / 2 } + slam.pairs.count
 
-        return true
+        return trumpPairCredits >= slamPairCredits
     }
 
     private func tractorInfo(of cards: [Card]) -> TractorInfo? {
@@ -589,5 +652,76 @@ struct TrickEvaluator {
             }
         }
         return result
+    }
+
+    // MARK: - 领出语音播报文字
+
+    /// 根据领出牌型返回应播报的文字
+    /// - 连对 → "拖拉机"
+    /// - 对子 → "对X"（X 为点数中文名，如"对A"、"对十"）
+    /// - 单张主牌 → "吊主"
+    /// - 单张非主 → "花色+点数"（如"黑桃A"、"红桃五"）
+    /// - 甩牌/其他 → ""（不播报）
+    func leadAnnouncement(cards: [Card]) -> String {
+        guard !cards.isEmpty else { return "" }
+
+        // 连对
+        if tractorInfo(of: cards) != nil {
+            return "拖拉机"
+        }
+
+        // 对子
+        if cards.count == 2 {
+            let key0 = CardComparator.pairKey(cards[0], trumpSuit: trumpSuit, trumpRank: trumpRank)
+            let key1 = CardComparator.pairKey(cards[1], trumpSuit: trumpSuit, trumpRank: trumpRank)
+            if key0 == key1 {
+                return "对\(rankName(cards[0].rank))"
+            }
+        }
+
+        // 单张
+        if cards.count == 1 {
+            let card = cards[0]
+            if CardComparator.isTrump(card, trumpSuit: trumpSuit, trumpRank: trumpRank) {
+                return "吊主"
+            }
+            let suit = card.suit.map { suitName($0) } ?? ""
+            return "\(suit)\(rankName(card.rank))"
+        }
+
+        // 甩牌播报"甩牌"
+        if slamInfo(of: cards) != nil { return "甩牌" }
+
+        // 其他牌型不播报
+        return ""
+    }
+
+    private func rankName(_ rank: Rank) -> String {
+        switch rank {
+        case .two:       return "二"
+        case .three:     return "三"
+        case .four:      return "四"
+        case .five:      return "五"
+        case .six:       return "六"
+        case .seven:     return "七"
+        case .eight:     return "八"
+        case .nine:      return "九"
+        case .ten:       return "十"
+        case .jack:      return "J"
+        case .queen:     return "Q"
+        case .king:      return "K"
+        case .ace:       return "A"
+        case .smallJoker: return "小王"
+        case .bigJoker:  return "大王"
+        }
+    }
+
+    private func suitName(_ suit: Suit) -> String {
+        switch suit {
+        case .spades:   return "黑桃"
+        case .hearts:   return "红桃"
+        case .diamonds: return "方块"
+        case .clubs:    return "梅花"
+        }
     }
 }

@@ -3,6 +3,7 @@ import SwiftUI
 struct GameBoardView: View {
     @ObservedObject var engine: GameEngine
     @State private var showHistory = false
+    @State private var soundEnabled = SoundManager.shared.soundEnabled
 
     private var state: GameState { engine.state }
     private var localPosition: PlayerPosition { engine.localPosition }
@@ -79,6 +80,7 @@ struct GameBoardView: View {
             if state.phase == .gameOver {
                 GameOverView(
                     teamLevels: state.teamLevels,
+                    localTeam: engine.localPlayer.team,
                     onRestart: { engine.startNewGame() },
                     onQuit: {
                         engine.multiplayer.leave()
@@ -146,13 +148,27 @@ struct GameBoardView: View {
                             .clipShape(Capsule())
                         }
                     }
+
+                    // 音效开关
+                    Button(action: {
+                        soundEnabled.toggle()
+                        SoundManager.shared.soundEnabled = soundEnabled
+                        if !soundEnabled { SoundManager.shared.stopAll() }
+                    }) {
+                        Image(systemName: soundEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white)
+                            .padding(6)
+                            .background(Color.black.opacity(0.55))
+                            .clipShape(Circle())
+                    }
                 }
                 .padding(.horizontal, 10)
                 .padding(.top, 6)
 
                 Spacer()
             }
-            .allowsHitTesting(!state.completedTricks.isEmpty)
+            .allowsHitTesting(true)
 
             // ── 历史出牌记录面板 ─────────────────────────
             if showHistory {
@@ -384,7 +400,8 @@ struct GameBoardView: View {
                 isActive: state.currentTurn == localPosition &&
                     (state.phase == .playing || state.phase == .kittyExchange),
                 canSelect: state.phase == .playing || state.phase == .kittyExchange
-                    || state.phase == .dealing
+                    || state.phase == .dealing,
+                lastDrawnCardId: state.lastDrawnCardId
             )
             .background(Color.black.opacity(0.12))
         }
@@ -412,13 +429,18 @@ struct GameBoardView: View {
 // MARK: - Game Over
 struct GameOverView: View {
     let teamLevels: [Int: Rank]
+    let localTeam: Int
     let onRestart: () -> Void
     let onQuit: () -> Void
 
-    private var winner: String {
+    private var winnerTeam: Int {
         let southNorth = teamLevels[0]?.rawValue ?? 0
         let eastWest   = teamLevels[1]?.rawValue ?? 0
-        return southNorth >= eastWest ? "南北队" : "东西队"
+        return southNorth >= eastWest ? 0 : 1
+    }
+
+    private var winner: String {
+        winnerTeam == 0 ? "南北队" : "东西队"
     }
 
     var body: some View {
@@ -427,7 +449,7 @@ struct GameOverView: View {
 
             HStack(spacing: 40) {
                 VStack(spacing: 16) {
-                    Text("🎊")
+                    Text(winnerTeam == localTeam ? "🎊" : "😔")
                         .font(.system(size: 48))
                     Text("\(winner) 获胜！")
                         .font(.title2.bold())
