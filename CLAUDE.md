@@ -96,11 +96,15 @@ Views/
 
 > 甩牌未被将吃时，甩牌者为大（无人打出主牌则先手始终是赢家）
 
+> 将吃甩牌的第一必要条件：出的牌**全部**是主牌（`cards.allSatisfy { cardSuit($0) == nil }`）
+
 **甩牌时多家出主牌的比较**（`slamTrumpBeats`）：
-先手为甩牌时，多个主牌出牌按结构层级比较（不能单纯比最高单张）：
-1. 先比**最高连对**（对数多者优先，同对数比最高牌）
-2. 无连对：比**最高对子**
-3. 无对子：比**最高单张**
+比较层级由**领出甩牌的结构**决定，而非固定优先级：
+- 领出含连对 → 先比最高连对（对数多者优先，同对数比最高牌），再比对子，再比单张
+- 领出含对子（无连对）→ 先比最高对子，再比单张
+- 领出纯散牌 → 仅比最高单张
+
+> 例：北甩 Q♥10♥（纯散牌），东出 ♣3♣3，南出大王+主K → 领出无对子，只比最高单张：大王(100) > ♣3(70) → 南赢
 
 **亮主规则**：
 - **第 1 局**：亮主者成为庄家（`applyDeclaration` 调用 `setDealer`，反主可覆盖）
@@ -117,11 +121,26 @@ Views/
 ## AI 出牌优先级（AIPlayer）
 
 ### 先手出牌优先级（leadCards）
-1. **旁门 Ace**：手中最强的非主花色 A（`strongestSideAce`）
-2. **非主花色连对（拖拉机）**：找非主花色中的连对（`findTractor`）
-3. **非主花色对子**：找非主花色中的对子，优先出最大对（`findPair`）
-4. **最小主牌**：手中最弱的主牌
-5. **最弱牌**：手中任意最弱的牌
+0. **甩牌**：同一非主花色中有 2+ 张"无法被压制"的牌时一起甩出（`findSlamLead`）
+1. **已是最大的非主牌对子**：同花色中最大牌是对子时优先出对子
+2. **已是最大的非主牌单张**：同花色中最大单张
+3. **旁门 Ace**：手中最强的非主花色 A（`bestSideAce`）
+4. **非主花色连对（拖拉机）**：找非主花色中的连对（`findTractor`）
+5. **非主花色对子**：找非主花色中的对子，优先出最大对（`findPair`）
+6. **引出队友垫分**：队友已绝某花色且该花色有分未出，领出让队友垫分
+7. **最小主牌**：手中最弱的主牌
+8. **最弱牌**：手中任意最弱的牌
+
+**AI 甩牌判断**（`findSlamLead`）：
+
+单张和对子分量用不同标准判断"无法被压制"：
+- **单张最大**（`isEffectivelyBiggestSingle`）：所有更高 rank 在 played+hand ≥ 2（双副牌两张都已知晓，对手无法有更大单张）
+- **对子最大**（`isEffectivelyBiggestPair`）：所有更高 rank 在 played+hand ≥ 1（对手至多 1 张，凑不成更大对子）
+
+> 例：手中 A♠K♠K♠ → A 在手故外面最多 1 张 A，KK 是最大对子；A 是最大单张 → 合法甩牌
+> 例：手中 A♠Q♠Q♠ 且有 K♠ → K/A 各有 ≥1 张已知晓，QQ 是最大对子 → 合法甩牌
+
+已知对手绝该花色时，只有含对子的组合才甩（纯散牌送将吃毫无意义）。
 
 ### 跟牌策略（followCards）
 
@@ -141,6 +160,20 @@ Views/
 **队友赢时（partnerWinning）：**
 - 不尝试压牌
 - 出「支持牌」：优先出高分牌（10/K/5），其次出非主的弱牌（`partnerSupportOrder`）
+
+**队友甩牌支持：**
+- 队友甩牌 ≥4 张且含对子且当前领先时，以拖拉机策略出支持牌（`safePartnerCards`）
+
+**安全出主**（`isSafeTrumpFiller`）：
+- 跟主牌时，若非最后出牌位且后面还有对方未出牌，只从"安全牌"中选最弱能压的，避免被后手截胡
+- 安全牌定义：大王 / 小王 / 级牌 / 主花色 A 及以上始终安全
+- 动态安全：若该牌 rank 以上的主花色分牌（K/10/5，排除级牌）已全部打出（双副牌各 2 张），则该牌也视为安全（例：两张 K 都出了，J 变为安全牌）
+
+**激进模式：**
+- 触发条件：本墩已积分 ≥ 10 且攻方总得分 > 60
+- 非最后出牌位：出最强的能压牌
+- 最后出牌位：出最弱的能压牌
+- 无法压时：出最弱牌（不再贡献分牌给对手）
 
 **垫牌优先级（discardOrder，从先到后）：**
 1. 非主牌优先于主牌
@@ -173,9 +206,18 @@ startNewGame()
 
 ### 亮主规则
 - 发牌过程中可亮主
-- 单张亮主 strength=1，对子亮主 strength=2
+- 单张亮主 strength=1，对子亮主 strength=2，对王无主 strength=3
 - 反主需严格大于当前 strength
 - 发牌结束若无人亮主：真人庄家手动亮主；AI 庄家强制亮主
+
+**AI 亮主限制**（`aiConsiderDeclaration`）：
+
+| 亮主类型 | 限制条件 |
+|---------|---------|
+| 单张亮主（strength=1） | 仅须满足发牌进度门槛，无额外手牌要求 |
+| 对级牌首次亮主（cur=0） | 满足进度门槛即可 |
+| 对级牌反不同花色（cur>0） | 新花色级牌数 > 当前声明数；相同则需更多对子；否则不反 |
+| 对王反无主（strength=3） | 手中需 ≥3 张 A 且 ≥3 对子（含连对），否则不反 |
 
 ### 底牌换底
 - 庄家将 8 张牌压入底牌
@@ -218,11 +260,16 @@ startNewGame()
 |------|------|
 | 修改出牌合法性规则 | `TrickEvaluator.isValidPlay` |
 | 修改甩牌检测 / 拆解逻辑 | `TrickEvaluator.slamInfo` / `decomposeSlam` |
+| 修改甩牌赢家比较逻辑 | `TrickEvaluator.slamTrumpBeats` |
 | 修改甩牌罚分计算 | `TrickEvaluator.slamPenaltyPoints` |
 | 修改甩牌强制出牌逻辑 | `GameEngine.analyzeSlamLead` |
 | 修改赢墩判断 | `TrickEvaluator.beatsPlay` / `winner` |
 | 修改 AI 先手策略 | `AIPlayer.leadCards` |
+| 修改 AI 甩牌领出条件 | `AIPlayer.findSlamLead` / `isEffectivelyBiggestSingle` / `isEffectivelyBiggestPair` |
 | 修改 AI 跟牌策略 | `AIPlayer.followCards` / `followTractor` / `followPair` |
+| 修改 AI 安全出主逻辑 | `AIPlayer.isSafeTrumpFiller` |
+| 修改 AI 激进模式阈值 | `AIPlayer.followCards`（`trickPoints` / `attackScore` 判断处）|
 | 修改垫牌/支持牌逻辑 | `AIPlayer.discardOrder` / `partnerSupportOrder` |
 | 修改主牌大小顺序 | `CardComparator.trumpWeight` |
 | 修改升级得分阈值 | `GameEngine.resolveRound` |
+| 修改 AI 亮主限制 | `GameEngine.aiConsiderDeclaration` |
