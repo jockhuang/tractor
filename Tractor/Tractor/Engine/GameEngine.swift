@@ -113,8 +113,8 @@ class GameEngine: ObservableObject {
             }
             syncMultiplayerState()
 
-            // 等待间隔（快速模式约 50ms，正常模式约 1s）
-            let ns: UInt64 = state.isDealingFast ? 40_000_000 : 900_000_000
+            // 等待间隔（快速模式约 50ms，正常模式约 250ms）
+            let ns: UInt64 = state.isDealingFast ? 40_000_000 : 250_000_000
             do {
                 try await Task.sleep(nanoseconds: ns)
             } catch { return }
