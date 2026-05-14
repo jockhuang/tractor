@@ -126,8 +126,8 @@ Views/
 2. **已是最大的非主牌单张**：同花色中最大单张
 3. **旁门 Ace**：手中最强的非主花色 A（`bestSideAce`）
 4. **非主花色连对（拖拉机）**：找非主花色中的连对（`findTractor`）
-5. **非主花色对子**：找非主花色中的对子，优先出最大对（`findPair`）
-6. **引出队友垫分**：队友已绝某花色且该花色有分未出，领出让队友垫分
+5. **引出队友垫分**：队友已绝某花色且该花色有分未出，领出让队友垫分
+6. **非主花色对子**：找非主花色中的对子，优先出最大对（`findPair`）
 7. **最小主牌**：手中最弱的主牌
 8. **最弱牌**：手中任意最弱的牌
 
@@ -158,8 +158,16 @@ Views/
 | 单牌 | 内联逻辑 | 有能压赢的牌则出最弱能压赢的牌；否则出最弱牌 |
 
 **队友赢时（partnerWinning）：**
-- 不尝试压牌
-- 出「支持牌」：优先出高分牌（10/K/5），其次出非主的弱牌（`partnerSupportOrder`）
+- 有足够同花色牌时：不尝试压牌，出「支持牌」：优先出高分牌（10/K/5），其次出非主的弱牌（`partnerSupportOrder`）
+- 自己绝了领出花色时（`voidFillCards`），根据 `partnerAtRisk` 判断：
+  - **`partnerAtRisk = true`**（该花色还有更大的未出牌，队友可能被后续对手压走）：
+    - 用主将吃，不垫分
+    - 若已知后手对手也绝该花色（`enemySubsequentVoidInLead`）：用安全出主策略（`isSafeTrumpFiller`，A/王/级牌），防止被截胡
+    - 否则：优先出孤张主牌分（10/K/5，不拆对子）垫给队友；无则出最弱主牌
+    - 无主牌时：安全垫牌（不送分）
+  - **`partnerAtRisk = false`**（该花色更大的牌已全部出完，队友必然赢）：
+    - 若后手对手绝花色（`enemySubsequentVoidInLead`）：谨慎垫牌，不加分，出主只用安全主牌
+    - 否则：正常垫分支持（`safePartnerCards`）
 
 **队友甩牌支持：**
 - 队友甩牌 ≥4 张且含对子且当前领先时，以拖拉机策略出支持牌（`safePartnerCards`）
@@ -267,6 +275,7 @@ startNewGame()
 | 修改 AI 先手策略 | `AIPlayer.leadCards` |
 | 修改 AI 甩牌领出条件 | `AIPlayer.findSlamLead` / `isEffectivelyBiggestSingle` / `isEffectivelyBiggestPair` |
 | 修改 AI 跟牌策略 | `AIPlayer.followCards` / `followTractor` / `followPair` |
+| 修改 AI 绝花色后填牌逻辑（将吃 / 垫分） | `AIPlayer.voidFillCards`（`partnerAtRisk` / `enemySubsequentVoidInLead`）|
 | 修改 AI 安全出主逻辑 | `AIPlayer.isSafeTrumpFiller` |
 | 修改 AI 激进模式阈值 | `AIPlayer.followCards`（`trickPoints` / `attackScore` 判断处）|
 | 修改垫牌/支持牌逻辑 | `AIPlayer.discardOrder` / `partnerSupportOrder` |
