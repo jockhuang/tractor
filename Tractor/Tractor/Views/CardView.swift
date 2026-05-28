@@ -119,12 +119,12 @@ struct CardView: View {
 
             ZStack {
                 Text(isBig ? "大" : "小")
-                    .font(.system(size: isSmall ? 13 : 20, weight: .heavy, design: .rounded))
-                    .offset(x: isSmall ? -6 : -9, y: isSmall ? -8 : -13)
+                    .font(.system(size: isSmall ? 11 : 17, weight: .heavy, design: .rounded))
+                    .offset(x: isSmall ? -5 : -8, y: isSmall ? -7 : -11)
                     .opacity(0.45)
 
                 Text("王")
-                    .font(.system(size: isSmall ? 30 : 46, weight: .heavy, design: .rounded))
+                    .font(.system(size: isSmall ? 26 : 40, weight: .heavy, design: .rounded))
             }
             .frame(maxWidth: .infinity)
 
@@ -139,7 +139,7 @@ struct CardView: View {
             .padding(.bottom, isSmall ? 3 : 5)
         }
         .foregroundColor(jokerColor)
-        .shadow(color: jokerColor.opacity(isBig ? 0.5 : 0.4), radius: isSmall ? 2 : 3)
+        .shadow(color: jokerColor.opacity(isBig ? 0.35 : 0.3), radius: isSmall ? 1 : 2)
     }
 
     private func jokerCornerLabel(isBig: Bool) -> some View {
