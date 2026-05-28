@@ -10,7 +10,18 @@ struct PlayerHandView: View {
 
     private let cardWidth: CGFloat = 64
     private let cardHeight: CGFloat = 90
+    private let selectedCardLift: CGFloat = 12
+    private let drawnCardLift: CGFloat = 10
+    private let verticalPadding: CGFloat = 16
     private let overlapFactor: CGFloat = 0.55  // 叠牌重叠比例
+
+    private var topPadding: CGFloat {
+        verticalPadding + max(selectedCardLift, drawnCardLift)
+    }
+
+    private var handHeight: CGFloat {
+        cardHeight + topPadding + verticalPadding
+    }
 
     var body: some View {
         let cards = player.hand
@@ -25,8 +36,7 @@ struct PlayerHandView: View {
                         card: card,
                         isSelected: selectedCards.contains(card.id)
                     )
-                    .offset(y: selectedCards.contains(card.id) ? -12
-                               : (card.id == lastDrawnCardId ? -10 : 0))
+                    .offset(y: cardOffset(for: card))
                     .onTapGesture {
                         if canSelect && isActive {
                             withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) {
@@ -41,9 +51,21 @@ struct PlayerHandView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 16)
+            .padding(.top, topPadding)
+            .padding(.bottom, verticalPadding)
         }
-        .frame(height: cardHeight + 32)
+        .scrollClipDisabled()
+        .frame(height: handHeight)
+    }
+
+    private func cardOffset(for card: Card) -> CGFloat {
+        if selectedCards.contains(card.id) {
+            return -selectedCardLift
+        }
+        if card.id == lastDrawnCardId {
+            return -drawnCardLift
+        }
+        return 0
     }
 }
 

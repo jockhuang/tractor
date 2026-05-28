@@ -7,63 +7,63 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		AA11223344556677889900BB /* SoundManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11223344556677889900AA /* SoundManager.swift */; };
-		CC11223344556677889900DD /* poker_card_draw_sound.wav in Resources */ = {isa = PBXBuildFile; fileRef = CC11223344556677889900CC /* poker_card_draw_sound.wav */; };
-		EE11223344556677889900FF /* card_slap_on_table.wav in Resources */ = {isa = PBXBuildFile; fileRef = EE11223344556677889900EE /* card_slap_on_table.wav */; };
 		1111223344556677889900AA /* game_victory_sound.wav in Resources */ = {isa = PBXBuildFile; fileRef = 1111223344556677889900BB /* game_victory_sound.wav */; };
 		2222334455667788990011CC /* game_over_sound.wav in Resources */ = {isa = PBXBuildFile; fileRef = 2222334455667788990011DD /* game_over_sound.wav */; };
-		8FE9E5F3FF2FB847882F37B2 /* TractorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95D202B73DE64F6C7959E5A6 /* TractorApp.swift */; };
-		7F4BB21E8B4B2CE059FAD509 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 152D3A87DFF7600785C9B431 /* ContentView.swift */; };
-		F7A77112F7889361098812F4 /* Card.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5513BD913D4ECE1D2EC86200 /* Card.swift */; };
-		BE654BC016F1765126FE895C /* Deck.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97949698EDBA15361ED3EF3D /* Deck.swift */; };
-		47632B72194181B6B1A821C2 /* Player.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7A0F9BE6DB640A1CF5905EE /* Player.swift */; };
 		36EA1A29CEB5F055D9A6A3E9 /* GameState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9055326848B8287026FFE795 /* GameState.swift */; };
-		B176C172D8FA58B1E823618B /* CardComparator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D50307D2A5F27D4B1F40B72B /* CardComparator.swift */; };
-		45A7669070DAE1B2509547C6 /* TrickEvaluator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3CE76666EC8CF3A19C2C9E6 /* TrickEvaluator.swift */; };
 		411CB30A47B3933C8D9261AF /* GameEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFBC7A8976E032FC4F3B7CAD /* GameEngine.swift */; };
-		E5641B86C1EAE4FBC33316DC /* AIPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 430E2C1FD0EDE7513C6AA059 /* AIPlayer.swift */; };
-		9D4CFD2F0F4D4FC7A7010C2D /* LANMultiplayerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63D879AC0F3F4A45B6B75612 /* LANMultiplayerManager.swift */; };
+		45A7669070DAE1B2509547C6 /* TrickEvaluator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3CE76666EC8CF3A19C2C9E6 /* TrickEvaluator.swift */; };
+		47632B72194181B6B1A821C2 /* Player.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7A0F9BE6DB640A1CF5905EE /* Player.swift */; };
+		50DDA9FB6CFEFD5588916417 /* GameBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C98CB540074BC5E848216557 /* GameBoardView.swift */; };
 		5E0A467A71D79627922C7A40 /* CardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C09DB23798084A0467D64803 /* CardView.swift */; };
+		7CBCBC72E9623C2D53F281BA /* KittyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48E5EE73804B88FAEFDA2869 /* KittyView.swift */; };
+		7F4BB21E8B4B2CE059FAD509 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 152D3A87DFF7600785C9B431 /* ContentView.swift */; };
+		8FE9E5F3FF2FB847882F37B2 /* TractorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95D202B73DE64F6C7959E5A6 /* TractorApp.swift */; };
+		9D4CFD2F0F4D4FC7A7010C2D /* LANMultiplayerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63D879AC0F3F4A45B6B75612 /* LANMultiplayerManager.swift */; };
+		A082732A9607D6F915C0FFD2 /* MenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F3D41A45212AAAC70FAB15C /* MenuView.swift */; };
+		A1B2C3D4E5F6A7B8C9D0E1F2 /* TrickHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6A7B8C9D0E1F2A3 /* TrickHistoryView.swift */; };
+		AA11223344556677889900BB /* SoundManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11223344556677889900AA /* SoundManager.swift */; };
+		B176C172D8FA58B1E823618B /* CardComparator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D50307D2A5F27D4B1F40B72B /* CardComparator.swift */; };
+		B95FF48B976B4685DF6ED2F6 /* DealingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCE6FDA953C788095A46F543 /* DealingView.swift */; };
+		BE654BC016F1765126FE895C /* Deck.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97949698EDBA15361ED3EF3D /* Deck.swift */; };
+		CC11223344556677889900DD /* poker_card_draw_sound.wav in Resources */ = {isa = PBXBuildFile; fileRef = CC11223344556677889900CC /* poker_card_draw_sound.wav */; };
 		E0E6F7B44929E5AAB955F6DD /* PlayerHandView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB1E689C7FBD979E299D6C33 /* PlayerHandView.swift */; };
 		E36D48B2BE47B429074048E2 /* TrickAreaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1895631AC0027FE299A34C21 /* TrickAreaView.swift */; };
-		7CBCBC72E9623C2D53F281BA /* KittyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48E5EE73804B88FAEFDA2869 /* KittyView.swift */; };
-		F92468377D607B4A598C1E1B /* RoundResultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E6A21A7043996B65A64A6AE /* RoundResultView.swift */; };
-		A082732A9607D6F915C0FFD2 /* MenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F3D41A45212AAAC70FAB15C /* MenuView.swift */; };
-		50DDA9FB6CFEFD5588916417 /* GameBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C98CB540074BC5E848216557 /* GameBoardView.swift */; };
+		E5641B86C1EAE4FBC33316DC /* AIPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 430E2C1FD0EDE7513C6AA059 /* AIPlayer.swift */; };
+		EE11223344556677889900FF /* card_slap_on_table.wav in Resources */ = {isa = PBXBuildFile; fileRef = EE11223344556677889900EE /* card_slap_on_table.wav */; };
+		F7A77112F7889361098812F4 /* Card.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5513BD913D4ECE1D2EC86200 /* Card.swift */; };
 		F7B235559E4A7603B1BBD6F2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 671E5B54412D9F8033A8454C /* Assets.xcassets */; };
-		B95FF48B976B4685DF6ED2F6 /* DealingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCE6FDA953C788095A46F543 /* DealingView.swift */; };
-		A1B2C3D4E5F6A7B8C9D0E1F2 /* TrickHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6A7B8C9D0E1F2A3 /* TrickHistoryView.swift */; };
+		F92468377D607B4A598C1E1B /* RoundResultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E6A21A7043996B65A64A6AE /* RoundResultView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		95D202B73DE64F6C7959E5A6 /* TractorApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TractorApp.swift; sourceTree = "<group>"; };
-		152D3A87DFF7600785C9B431 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		5513BD913D4ECE1D2EC86200 /* Card.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Card.swift; sourceTree = "<group>"; };
-		97949698EDBA15361ED3EF3D /* Deck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Deck.swift; sourceTree = "<group>"; };
-		E7A0F9BE6DB640A1CF5905EE /* Player.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Player.swift; sourceTree = "<group>"; };
-		9055326848B8287026FFE795 /* GameState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameState.swift; sourceTree = "<group>"; };
-		D50307D2A5F27D4B1F40B72B /* CardComparator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardComparator.swift; sourceTree = "<group>"; };
-		F3CE76666EC8CF3A19C2C9E6 /* TrickEvaluator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrickEvaluator.swift; sourceTree = "<group>"; };
-		CFBC7A8976E032FC4F3B7CAD /* GameEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameEngine.swift; sourceTree = "<group>"; };
-		430E2C1FD0EDE7513C6AA059 /* AIPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPlayer.swift; sourceTree = "<group>"; };
-		63D879AC0F3F4A45B6B75612 /* LANMultiplayerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LANMultiplayerManager.swift; sourceTree = "<group>"; };
-		C09DB23798084A0467D64803 /* CardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardView.swift; sourceTree = "<group>"; };
-		AB1E689C7FBD979E299D6C33 /* PlayerHandView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerHandView.swift; sourceTree = "<group>"; };
-		1895631AC0027FE299A34C21 /* TrickAreaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrickAreaView.swift; sourceTree = "<group>"; };
-		48E5EE73804B88FAEFDA2869 /* KittyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KittyView.swift; sourceTree = "<group>"; };
-		8E6A21A7043996B65A64A6AE /* RoundResultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoundResultView.swift; sourceTree = "<group>"; };
-		0F3D41A45212AAAC70FAB15C /* MenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuView.swift; sourceTree = "<group>"; };
-		C98CB540074BC5E848216557 /* GameBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameBoardView.swift; sourceTree = "<group>"; };
-		671E5B54412D9F8033A8454C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		0A929019CD960CE95E5D54A9 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		A97C29AD63741CF438998CE6 /* Tractor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Tractor.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		BCE6FDA953C788095A46F543 /* DealingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DealingView.swift; sourceTree = "<group>"; };
-		B2C3D4E5F6A7B8C9D0E1F2A3 /* TrickHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrickHistoryView.swift; sourceTree = "<group>"; };
-		AA11223344556677889900AA /* SoundManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundManager.swift; sourceTree = "<group>"; };
-		CC11223344556677889900CC /* poker_card_draw_sound.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = poker_card_draw_sound.wav; sourceTree = "<group>"; };
-		EE11223344556677889900EE /* card_slap_on_table.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = card_slap_on_table.wav; sourceTree = "<group>"; };
+		0F3D41A45212AAAC70FAB15C /* MenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuView.swift; sourceTree = "<group>"; };
 		1111223344556677889900BB /* game_victory_sound.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = game_victory_sound.wav; sourceTree = "<group>"; };
+		152D3A87DFF7600785C9B431 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		1895631AC0027FE299A34C21 /* TrickAreaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrickAreaView.swift; sourceTree = "<group>"; };
 		2222334455667788990011DD /* game_over_sound.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = game_over_sound.wav; sourceTree = "<group>"; };
+		430E2C1FD0EDE7513C6AA059 /* AIPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPlayer.swift; sourceTree = "<group>"; };
+		48E5EE73804B88FAEFDA2869 /* KittyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KittyView.swift; sourceTree = "<group>"; };
+		5513BD913D4ECE1D2EC86200 /* Card.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Card.swift; sourceTree = "<group>"; };
+		63D879AC0F3F4A45B6B75612 /* LANMultiplayerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LANMultiplayerManager.swift; sourceTree = "<group>"; };
+		671E5B54412D9F8033A8454C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		8E6A21A7043996B65A64A6AE /* RoundResultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoundResultView.swift; sourceTree = "<group>"; };
+		9055326848B8287026FFE795 /* GameState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameState.swift; sourceTree = "<group>"; };
+		95D202B73DE64F6C7959E5A6 /* TractorApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TractorApp.swift; sourceTree = "<group>"; };
+		97949698EDBA15361ED3EF3D /* Deck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Deck.swift; sourceTree = "<group>"; };
+		A97C29AD63741CF438998CE6 /* Tractor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Tractor.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA11223344556677889900AA /* SoundManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundManager.swift; sourceTree = "<group>"; };
+		AB1E689C7FBD979E299D6C33 /* PlayerHandView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerHandView.swift; sourceTree = "<group>"; };
+		B2C3D4E5F6A7B8C9D0E1F2A3 /* TrickHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrickHistoryView.swift; sourceTree = "<group>"; };
+		BCE6FDA953C788095A46F543 /* DealingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DealingView.swift; sourceTree = "<group>"; };
+		C09DB23798084A0467D64803 /* CardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardView.swift; sourceTree = "<group>"; };
+		C98CB540074BC5E848216557 /* GameBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameBoardView.swift; sourceTree = "<group>"; };
+		CC11223344556677889900CC /* poker_card_draw_sound.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = poker_card_draw_sound.wav; sourceTree = "<group>"; };
+		CFBC7A8976E032FC4F3B7CAD /* GameEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameEngine.swift; sourceTree = "<group>"; };
+		D50307D2A5F27D4B1F40B72B /* CardComparator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardComparator.swift; sourceTree = "<group>"; };
+		E7A0F9BE6DB640A1CF5905EE /* Player.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Player.swift; sourceTree = "<group>"; };
+		EE11223344556677889900EE /* card_slap_on_table.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = card_slap_on_table.wav; sourceTree = "<group>"; };
+		F3CE76666EC8CF3A19C2C9E6 /* TrickEvaluator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrickEvaluator.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -77,6 +77,15 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		095FEE2E633C50D24407F2D6 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				95D202B73DE64F6C7959E5A6 /* TractorApp.swift */,
+				152D3A87DFF7600785C9B431 /* ContentView.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
 		7882D14E196057770B59E53D = {
 			isa = PBXGroup;
 			children = (
@@ -85,12 +94,52 @@
 			);
 			sourceTree = "<group>";
 		};
+		78EF4B0EA3FDA2A792BCF074 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				C09DB23798084A0467D64803 /* CardView.swift */,
+				AB1E689C7FBD979E299D6C33 /* PlayerHandView.swift */,
+				1895631AC0027FE299A34C21 /* TrickAreaView.swift */,
+				48E5EE73804B88FAEFDA2869 /* KittyView.swift */,
+				8E6A21A7043996B65A64A6AE /* RoundResultView.swift */,
+				0F3D41A45212AAAC70FAB15C /* MenuView.swift */,
+				C98CB540074BC5E848216557 /* GameBoardView.swift */,
+				BCE6FDA953C788095A46F543 /* DealingView.swift */,
+				B2C3D4E5F6A7B8C9D0E1F2A3 /* TrickHistoryView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
 		BF7A2D27A78D590BDEF15AF2 /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				A97C29AD63741CF438998CE6 /* Tractor.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		C2B2C90D486CB339AA37D21B /* Engine */ = {
+			isa = PBXGroup;
+			children = (
+				D50307D2A5F27D4B1F40B72B /* CardComparator.swift */,
+				F3CE76666EC8CF3A19C2C9E6 /* TrickEvaluator.swift */,
+				CFBC7A8976E032FC4F3B7CAD /* GameEngine.swift */,
+				430E2C1FD0EDE7513C6AA059 /* AIPlayer.swift */,
+				63D879AC0F3F4A45B6B75612 /* LANMultiplayerManager.swift */,
+				AA11223344556677889900AA /* SoundManager.swift */,
+			);
+			path = Engine;
+			sourceTree = "<group>";
+		};
+		CA608C0B22E7B6F9B389BDDD /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				5513BD913D4ECE1D2EC86200 /* Card.swift */,
+				97949698EDBA15361ED3EF3D /* Deck.swift */,
+				E7A0F9BE6DB640A1CF5905EE /* Player.swift */,
+				9055326848B8287026FFE795 /* GameState.swift */,
+			);
+			path = Models;
 			sourceTree = "<group>";
 		};
 		E46AF5FC07E59169747B3EEA /* Tractor */ = {
@@ -110,61 +159,12 @@
 			path = Tractor;
 			sourceTree = "<group>";
 		};
-		095FEE2E633C50D24407F2D6 /* App */ = {
-			isa = PBXGroup;
-			children = (
-				95D202B73DE64F6C7959E5A6 /* TractorApp.swift */,
-				152D3A87DFF7600785C9B431 /* ContentView.swift */,
-			);
-			path = App;
-			sourceTree = "<group>";
-		};
-		CA608C0B22E7B6F9B389BDDD /* Models */ = {
-			isa = PBXGroup;
-			children = (
-				5513BD913D4ECE1D2EC86200 /* Card.swift */,
-				97949698EDBA15361ED3EF3D /* Deck.swift */,
-				E7A0F9BE6DB640A1CF5905EE /* Player.swift */,
-				9055326848B8287026FFE795 /* GameState.swift */,
-			);
-			path = Models;
-			sourceTree = "<group>";
-		};
-		C2B2C90D486CB339AA37D21B /* Engine */ = {
-			isa = PBXGroup;
-			children = (
-				D50307D2A5F27D4B1F40B72B /* CardComparator.swift */,
-				F3CE76666EC8CF3A19C2C9E6 /* TrickEvaluator.swift */,
-				CFBC7A8976E032FC4F3B7CAD /* GameEngine.swift */,
-				430E2C1FD0EDE7513C6AA059 /* AIPlayer.swift */,
-				63D879AC0F3F4A45B6B75612 /* LANMultiplayerManager.swift */,
-				AA11223344556677889900AA /* SoundManager.swift */,
-			);
-			path = Engine;
-			sourceTree = "<group>";
-		};
-		78EF4B0EA3FDA2A792BCF074 /* Views */ = {
-			isa = PBXGroup;
-			children = (
-				C09DB23798084A0467D64803 /* CardView.swift */,
-				AB1E689C7FBD979E299D6C33 /* PlayerHandView.swift */,
-				1895631AC0027FE299A34C21 /* TrickAreaView.swift */,
-				48E5EE73804B88FAEFDA2869 /* KittyView.swift */,
-				8E6A21A7043996B65A64A6AE /* RoundResultView.swift */,
-				0F3D41A45212AAAC70FAB15C /* MenuView.swift */,
-				C98CB540074BC5E848216557 /* GameBoardView.swift */,
-				BCE6FDA953C788095A46F543 /* DealingView.swift */,
-				B2C3D4E5F6A7B8C9D0E1F2A3 /* TrickHistoryView.swift */,
-			);
-			path = Views;
-			sourceTree = "<group>";
-		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
 		E92819776D1D900150F17949 /* Tractor */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 8E4708D4CFF2398BAD54D31A;
+			buildConfigurationList = 8E4708D4CFF2398BAD54D31A /* Build configuration list for PBXNativeTarget "Tractor" */;
 			buildPhases = (
 				E7209FB05162B7572F88D05E /* Sources */,
 				29B2D46AA747A59804D46E1F /* Frameworks */,
@@ -194,7 +194,7 @@
 					};
 				};
 			};
-			buildConfigurationList = B2BE817334BDE0D051010E74;
+			buildConfigurationList = B2BE817334BDE0D051010E74 /* Build configuration list for PBXProject "Tractor" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = zh_CN;
 			hasScannedForEncodings = 0;
@@ -260,6 +260,50 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
+		4DC7B479A29173674AFD7BAC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = QF9FSRHDKH;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Tractor/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.tractor.game;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		683105B965893FCC643C4ECF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = QF9FSRHDKH;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Tractor/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.tractor.game;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 		71307F56FE0F050CBFE8BD6D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -304,60 +348,9 @@
 			};
 			name = Release;
 		};
-		683105B965893FCC643C4ECF /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Tractor/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.tractor.game;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
-		};
-		4DC7B479A29173674AFD7BAC /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Tractor/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.tractor.game;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		B2BE817334BDE0D051010E74 /* Build configuration list for PBXProject "Tractor" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				71307F56FE0F050CBFE8BD6D /* Debug */,
-				D4147F9DEB4AD84BF3A14790 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
 		8E4708D4CFF2398BAD54D31A /* Build configuration list for PBXNativeTarget "Tractor" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -367,8 +360,16 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		B2BE817334BDE0D051010E74 /* Build configuration list for PBXProject "Tractor" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				71307F56FE0F050CBFE8BD6D /* Debug */,
+				D4147F9DEB4AD84BF3A14790 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
-
 	};
 	rootObject = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
 }

@@ -18,7 +18,7 @@ struct Deck {
 
     /// 洗牌并发牌：4人各25张，剩余8张为底牌
     static func shuffleAndDeal() -> (hands: [[Card]], kitty: [Card]) {
-        var deck = doubleDeck().shuffled()
+        let deck = doubleDeck().shuffled()
         var hands: [[Card]] = [[], [], [], []]
         // 顺序发牌
         for i in 0..<100 {

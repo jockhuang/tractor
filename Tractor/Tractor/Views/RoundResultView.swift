@@ -6,6 +6,10 @@ struct RoundResultView: View {
     let onNext: () -> Void
     let onQuit: () -> Void
 
+    private let kittyCardHeight: CGFloat = 58
+    private let kittyTopPadding: CGFloat = 16
+    private let kittyBottomPadding: CGFloat = 10
+
     var body: some View {
         ZStack {
             Color.black.opacity(0.6)
@@ -96,10 +100,11 @@ struct RoundResultView: View {
                             CardView(card: card, isSmall: true)
                         }
                     }
-                    .padding(.top, 10)
-                    .padding(.bottom, 6)
+                    .padding(.top, kittyTopPadding)
+                    .padding(.bottom, kittyBottomPadding)
                 }
-                .frame(height: 86)
+                .scrollClipDisabled()
+                .frame(height: kittyCardHeight + kittyTopPadding + kittyBottomPadding + 6)
             }
         }
         .padding(12)
