@@ -390,7 +390,22 @@ struct AIPlayer {
                         chosen = Array(canBeat.prefix(count))
                     }
                 } else {
-                    chosen = Array(canBeat.prefix(count))
+                    if let guardCard = pointGuardCard(
+                        from: canBeat,
+                        leadSuit: leadSuit,
+                        winningRep: winningRep,
+                        hand: hand,
+                        position: position,
+                        state: state,
+                        trickPoints: trickPoints,
+                        ts: ts,
+                        tr: tr,
+                        ctx: ctx
+                    ) {
+                        chosen = [guardCard]
+                    } else {
+                        chosen = Array(canBeat.prefix(count))
+                    }
                 }
             } else if partnerWinning {
                 if leadIsTrump {
@@ -404,8 +419,27 @@ struct AIPlayer {
                         : weakestNonPointFirst(from: suitCards, count: count,
                                                trumpSuit: ts, trumpRank: tr)
                 } else {
-                    chosen = safePartnerCards(from: suitCards, count: count,
-                                              trumpSuit: ts, trumpRank: tr, ctx: ctx)
+                    let partnerRep = maxCard(in: winningCards, ts: ts, tr: tr)
+                    let protectiveCards = suitCards
+                        .filter { CardComparator.beats($0, partnerRep, trumpSuit: ts, trumpRank: tr) }
+                        .sorted { weakerCard($0, than: $1, trumpSuit: ts, trumpRank: tr) }
+                    if let guardCard = pointGuardCard(
+                        from: protectiveCards,
+                        leadSuit: leadSuit,
+                        winningRep: partnerRep,
+                        hand: hand,
+                        position: position,
+                        state: state,
+                        trickPoints: trickPoints,
+                        ts: ts,
+                        tr: tr,
+                        ctx: ctx
+                    ) {
+                        chosen = [guardCard]
+                    } else {
+                        chosen = safePartnerCards(from: suitCards, count: count,
+                                                  trumpSuit: ts, trumpRank: tr, ctx: ctx)
+                    }
                 }
             } else if shouldAvoidPointsWhenFollowing {
                 // 吊主保守：优先出无分主牌
@@ -514,7 +548,8 @@ struct AIPlayer {
                     ts: ts, tr: tr,
                     ctx: ctx,
                     enemySubsequentVoidInLead: enemySubsequentVoidInLead,
-                    partnerAtRisk: partnerAtRisk
+                    partnerAtRisk: partnerAtRisk,
+                    trickPoints: trickPoints
                 )
                 chosen += fills
             }
@@ -543,7 +578,8 @@ struct AIPlayer {
         tr: Rank,
         ctx: AIContext,
         enemySubsequentVoidInLead: Bool = false,
-        partnerAtRisk: Bool = false
+        partnerAtRisk: Bool = false,
+        trickPoints: Int = 0
     ) -> [Card] {
         guard remaining > 0 else { return [] }
 
@@ -555,9 +591,11 @@ struct AIPlayer {
                 }.sorted { weakerCard($0, than: $1, trumpSuit: ts, trumpRank: tr) }
 
                 if !trumpCards.isEmpty {
-                    // 后手对手也绝花色 → 安全出主（A 及以上），防止被截胡
                     let chosen: Card
-                    if enemySubsequentVoidInLead {
+                    if enemySubsequentVoidInLead && trickPoints > 0 {
+                        // 后手对手也绝花色且本墩已有分：用最大主抢住，防止被后手截胡拿分。
+                        chosen = trumpCards.last!
+                    } else if enemySubsequentVoidInLead {
                         let safeTrumps = trumpCards.filter { isSafeTrumpFiller($0, ts: ts, tr: tr, ctx: ctx) }
                         chosen = (safeTrumps.isEmpty ? trumpCards : safeTrumps).first!
                     } else {
@@ -1053,6 +1091,8 @@ struct AIPlayer {
         winningCards: [Card],
         ts: Suit?, tr: Rank
     ) -> [Card]? {
+        let pureSingleSlam = slam.tractors.isEmpty && slam.pairs.isEmpty
+        let pairedTrumpIDs = pairedCardIDs(in: trumpCards, trumpSuit: ts, trumpRank: tr)
         let tractorSizes = slam.tractors
             .compactMap { tractorInfo(of: $0, trumpSuit: ts, trumpRank: tr)?.pairCount }
             .sorted(by: >)
@@ -1081,7 +1121,14 @@ struct AIPlayer {
         }
 
         for _ in 0..<slam.singles.count {
-            let sorted = pool.sorted { discardOrder($0, before: $1, trumpSuit: ts, trumpRank: tr) }
+            let sorted = pool.sorted { a, b in
+                if pureSingleSlam {
+                    let aPaired = pairedTrumpIDs.contains(a.id)
+                    let bPaired = pairedTrumpIDs.contains(b.id)
+                    if aPaired != bPaired { return !aPaired }
+                }
+                return discardOrder(a, before: b, trumpSuit: ts, trumpRank: tr)
+            }
             guard let weakest = sorted.first else { return nil }
             result.append(weakest)
             pool = pool.filter { $0.id != weakest.id }
@@ -1103,6 +1150,15 @@ struct AIPlayer {
             return nil  // 压不过 → 不浪费主牌
         }
         return result
+    }
+
+    private static func pairedCardIDs(in cards: [Card], trumpSuit: Suit?, trumpRank: Rank) -> Set<UUID> {
+        var pairMap: [String: [Card]] = [:]
+        for card in cards {
+            pairMap[CardComparator.pairKey(card, trumpSuit: trumpSuit, trumpRank: trumpRank),
+                    default: []].append(card)
+        }
+        return Set(pairMap.values.filter { $0.count >= 2 }.flatMap { $0 }.map { $0.id })
     }
 
     // MARK: - 领出辅助
@@ -1309,6 +1365,76 @@ struct AIPlayer {
             if played < 2 { return false }
         }
         return true
+    }
+
+    /// 跟单牌时，如果后手对手可能用本门分牌反超，优先出能压住该分牌的最小牌。
+    private static func pointGuardCard(
+        from candidates: [Card],
+        leadSuit: Suit?,
+        winningRep: Card,
+        hand: [Card],
+        position: PlayerPosition,
+        state: GameState,
+        trickPoints: Int,
+        ts: Suit?,
+        tr: Rank,
+        ctx: AIContext
+    ) -> Card? {
+        guard let suit = leadSuit, !candidates.isEmpty, !ctx.isLastPlayer else { return nil }
+
+        let leadKey = suit.rawValue
+        let hasSubsequentEnemy = unplayedSubsequentPositions(after: position, in: state)
+            .contains { $0.team != position.team && !ctx.isVoid($0, key: leadKey) }
+        guard hasSubsequentEnemy else { return nil }
+
+        let pointRanks: [Rank] = [.king, .ten, .five]
+        for pointRank in pointRanks where pointRank != tr {
+            let played = ctx.playedCards.filter { $0.suit == suit && $0.rank == pointRank }.count
+            let inHand = hand.filter { $0.suit == suit && $0.rank == pointRank }.count
+            guard 2 - played - inHand > 0 else { continue }
+
+            let pointCard = Card(suit: suit, rank: pointRank)
+            guard CardComparator.beats(pointCard, winningRep, trumpSuit: ts, trumpRank: tr) else {
+                continue
+            }
+
+            let guardCandidates = candidates
+                .filter { CardComparator.beats($0, pointCard, trumpSuit: ts, trumpRank: tr) }
+                .sorted { weakerCard($0, than: $1, trumpSuit: ts, trumpRank: tr) }
+            guard !guardCandidates.isEmpty else { continue }
+            if trickPoints > 0 {
+                if let safeCard = guardCandidates.first(where: {
+                    isSideSuitProtectedAgainstHigher($0, suit: suit, hand: hand, ts: ts, tr: tr, ctx: ctx)
+                }) {
+                    return safeCard
+                }
+                return guardCandidates.last
+            }
+            return guardCandidates.first
+        }
+
+        return nil
+    }
+
+    private static func isSideSuitProtectedAgainstHigher(
+        _ card: Card,
+        suit: Suit,
+        hand: [Card],
+        ts: Suit?,
+        tr: Rank,
+        ctx: AIContext
+    ) -> Bool {
+        guard !CardComparator.isTrump(card, trumpSuit: ts, trumpRank: tr),
+              card.suit == suit else { return false }
+
+        let higherRanks = Rank.allCases.filter {
+            !$0.isJoker && $0 != tr && $0.rawValue > card.rank.rawValue
+        }
+        return higherRanks.allSatisfy { rank in
+            let played = ctx.playedCards.filter { $0.suit == suit && $0.rank == rank }.count
+            let inHand = hand.filter { $0.suit == suit && $0.rank == rank }.count
+            return played + inHand >= 2
+        }
     }
 
     /// 返回本墩中当前 position 之后、还未出牌的玩家列表（顺时针顺序）

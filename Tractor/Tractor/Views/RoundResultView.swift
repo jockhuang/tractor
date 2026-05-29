@@ -3,6 +3,7 @@ import SwiftUI
 struct RoundResultView: View {
     let result: RoundResult
     let teamLevels: [Int: Rank]
+    let canStartNext: Bool
     let onNext: () -> Void
     let onQuit: () -> Void
 
@@ -46,12 +47,13 @@ struct RoundResultView: View {
                         Button(action: onNext) {
                             Text("下一局 →")
                                 .font(.headline.bold())
-                                .foregroundColor(.white)
+                                .foregroundColor(canStartNext ? .white : .white.opacity(0.45))
                                 .padding(.horizontal, 28)
                                 .padding(.vertical, 12)
-                                .background(Color.blue)
+                                .background(canStartNext ? Color.blue : Color.gray.opacity(0.45))
                                 .clipShape(Capsule())
                         }
+                        .disabled(!canStartNext)
                     }
                 }
                 .padding(28)
