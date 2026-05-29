@@ -44,6 +44,15 @@ class GameEngine: ObservableObject {
         startNewRound()
     }
 
+    func returnToMenuFromMultiplayer() {
+        dealingTask?.cancel()
+        localPosition = .south
+        humanControlledPositions = [.south]
+        state.selectedCards = []
+        state.lastRoundResult = nil
+        state.phase = .menu
+    }
+
     func startMultiplayerGame(localPosition: PlayerPosition, humanPositions: Set<PlayerPosition>) {
         dealingTask?.cancel()
         self.localPosition = localPosition
@@ -156,6 +165,7 @@ class GameEngine: ObservableObject {
 
     /// 快速发牌（跳过剩余延迟）
     func toggleFastDealing() {
+        guard !multiplayer.hasRemotePlayers else { return }
         state.isDealingFast.toggle()
         syncMultiplayerState()
     }
@@ -951,6 +961,7 @@ class GameEngine: ObservableObject {
     // MARK: - 开始下一局
 
     func startNextRound() {
+        guard !multiplayer.isClient else { return }
         state.lastRoundResult = nil
         startNewRound()
     }

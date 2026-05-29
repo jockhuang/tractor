@@ -63,10 +63,9 @@ struct GameBoardView: View {
                 RoundResultView(
                     result: result,
                     teamLevels: state.teamLevels,
+                    canStartNext: !engine.multiplayer.isClient,
                     onNext: {
-                        if !engine.multiplayer.isClient {
-                            engine.startNextRound()
-                        }
+                        engine.startNextRound()
                     },
                     onQuit: {
                         engine.multiplayer.leave()

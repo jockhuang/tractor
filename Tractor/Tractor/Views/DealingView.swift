@@ -22,6 +22,9 @@ struct DealingOverlayView: View {
     private var bigJokerCount: Int {
         engine.localPlayer.hand.filter { $0.rank == .bigJoker }.count
     }
+    private var shouldShowFastDeal: Bool {
+        !engine.multiplayer.hasRemotePlayers
+    }
 
     var body: some View {
         HStack(spacing: 14) {
@@ -60,22 +63,26 @@ struct DealingOverlayView: View {
                 .overlay(Circle().strokeBorder(Color.yellow.opacity(0.5), lineWidth: 1))
                 .opacity(state.postDealCountdown > 0 ? 1 : 0)
 
-            // ── 快速发牌 ───────────────────────────────
-            Button(action: { engine.toggleFastDealing() }) {
-                Image(systemName: state.isDealingFast
-                      ? "forward.fill" : "forward")
-                    .font(.caption)
-                    .foregroundColor(.white)
-                    .padding(7)
-                    .background(state.isDealingFast
-                        ? Color.orange.opacity(0.7)
-                        : Color.white.opacity(0.15))
-                    .clipShape(Circle())
+            if shouldShowFastDeal {
+                // ── 快速发牌 ───────────────────────────────
+                Button(action: { engine.toggleFastDealing() }) {
+                    Image(systemName: state.isDealingFast
+                          ? "forward.fill" : "forward")
+                        .font(.caption)
+                        .foregroundColor(.white)
+                        .padding(7)
+                        .background(fastDealButtonBackground)
+                        .clipShape(Circle())
+                }
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 7)
         .background(Color.black.opacity(0.40))
+    }
+
+    private var fastDealButtonBackground: Color {
+        return state.isDealingFast ? Color.orange.opacity(0.7) : Color.white.opacity(0.15)
     }
 
     // MARK: - 进度条

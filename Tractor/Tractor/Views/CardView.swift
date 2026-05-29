@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct CardView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let card: Card
     var isSelected: Bool = false
     var isFaceDown: Bool = false
@@ -22,7 +24,12 @@ struct CardView: View {
         ZStack {
             RoundedRectangle(cornerRadius: isSmall ? 6 : 10)
                 .fill(Color(.systemBackground))
-                .shadow(color: .black.opacity(0.2), radius: isSmall ? 2 : 4, x: 0, y: isSmall ? 1 : 2)
+                .shadow(color: cardShadowColor, radius: isSmall ? 2 : 4, x: 0, y: cardShadowYOffset)
+                .shadow(color: cardGlowColor, radius: isSmall ? 1 : 3, x: 0, y: 0)
+                .overlay {
+                    RoundedRectangle(cornerRadius: isSmall ? 6 : 10)
+                        .strokeBorder(cardEdgeColor, lineWidth: isSmall ? 0.75 : 1)
+                }
 
             if isSelected {
                 RoundedRectangle(cornerRadius: isSmall ? 6 : 10)
@@ -48,7 +55,12 @@ struct CardView: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 ))
-                .shadow(color: .black.opacity(0.25), radius: isSmall ? 2 : 4, x: 0, y: isSmall ? 1 : 2)
+                .shadow(color: cardShadowColor, radius: isSmall ? 2 : 4, x: 0, y: cardShadowYOffset)
+                .shadow(color: cardGlowColor, radius: isSmall ? 1 : 3, x: 0, y: 0)
+                .overlay {
+                    RoundedRectangle(cornerRadius: isSmall ? 6 : 10)
+                        .strokeBorder(cardEdgeColor, lineWidth: isSmall ? 0.75 : 1)
+                }
 
             // 背面花纹
             RoundedRectangle(cornerRadius: isSmall ? 4 : 7)
@@ -153,10 +165,23 @@ struct CardView: View {
 
     private var cardWidth: CGFloat  { isSmall ? 40 : 64 }
     private var cardHeight: CGFloat { isSmall ? 58 : 90 }
+    private var isDarkMode: Bool { colorScheme == .dark }
+    private var cardShadowYOffset: CGFloat { isSmall ? 1 : 2 }
+    private var cardShadowColor: Color {
+        isDarkMode ? .white.opacity(0.16) : .black.opacity(0.2)
+    }
+    private var cardGlowColor: Color {
+        isDarkMode ? .white.opacity(0.12) : .clear
+    }
+    private var cardEdgeColor: Color {
+        isDarkMode ? .white.opacity(0.26) : .black.opacity(0.08)
+    }
 }
 
 // MARK: - Mini card for AI players
 struct MiniCardBack: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     var count: Int
     var cardHeight: CGFloat = 52
 
@@ -170,11 +195,27 @@ struct MiniCardBack: View {
                         endPoint: .bottomTrailing
                     ))
                     .frame(width: cardHeight * 0.69, height: cardHeight)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 5)
+                            .strokeBorder(miniCardEdgeColor, lineWidth: 0.75)
+                    }
                     .offset(x: CGFloat(i) * 4 - CGFloat(min(count,5)) * 2)
-                    .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
+                    .shadow(color: miniCardShadowColor, radius: 2, x: 0, y: 1)
+                    .shadow(color: miniCardGlowColor, radius: 2, x: 0, y: 0)
             }
         }
         .frame(height: cardHeight)  // 固定高度，count=0 时也保留空间
+    }
+
+    private var isDarkMode: Bool { colorScheme == .dark }
+    private var miniCardShadowColor: Color {
+        isDarkMode ? .white.opacity(0.16) : .black.opacity(0.2)
+    }
+    private var miniCardGlowColor: Color {
+        isDarkMode ? .white.opacity(0.12) : .clear
+    }
+    private var miniCardEdgeColor: Color {
+        isDarkMode ? .white.opacity(0.24) : .black.opacity(0.08)
     }
 }
 

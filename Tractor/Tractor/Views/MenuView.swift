@@ -199,7 +199,7 @@ struct LANLobbyView: View {
 
                 if multiplayer.isClient && !multiplayer.discoveredHosts.isEmpty {
                     SectionHeader("可加入房间")
-                    ForEach(multiplayer.discoveredHosts, id: \.displayName) { host in
+                    ForEach(Array(multiplayer.discoveredHosts.enumerated()), id: \.offset) { _, host in
                         Button(action: { multiplayer.join(host) }) {
                             HStack {
                                 Image(systemName: "iphone.gen3")
@@ -260,6 +260,11 @@ struct LANLobbyView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("断开") { multiplayer.leave() }
+                }
+            }
+            .onChange(of: multiplayer.mode) { _, mode in
+                if mode == .none {
+                    dismiss()
                 }
             }
         }

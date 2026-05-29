@@ -225,16 +225,31 @@ If all opponents are known to be void in the suit, only combinations containing 
 |---|---|---|
 | Tractor | `followTractor` | Prefer the weakest tractor that can win; if none, play the weakest tractor; if no tractor, play the weakest cards. |
 | Pair | `followPair` | Prefer the weakest pair that can win; if none, play the weakest pair; if no pair, play the weakest cards. |
-| Single | Inline logic | If a winning card exists, play the weakest one that wins; otherwise play the weakest card. |
+| Single | Inline logic | If a winning card exists, play the weakest one that wins. If unplayed scoring cards in the led suit could still overtake the current winner and a later opponent can still follow suit, use `pointGuardCard`: with no points currently in the trick, play the smallest card that guards the scoring card; with points already in the trick, prefer the smallest card whose higher ranks are fully accounted for, and fall back to the strongest candidate if none is safe. |
 
 ### When Partner Is Winning — `partnerWinning`
 
-- Do not try to beat the current winning play.
-- Play support cards: prefer high-scoring cards (10 / K / 5), then weak non-trump cards (`partnerSupportOrder`).
+- Usually play support cards: prefer high-scoring cards (10 / K / 5), then weak non-trump cards (`partnerSupportOrder`).
+- When following a single-card lead, if an unplayed scoring card in that suit could overtake the current winner and a later opponent can still act, the AI may overtake its partner with a larger same-suit card (`pointGuardCard`) to protect the trick. If the trick already contains points, it also checks whether higher ranks are still live outside; for example, Q is enough when both A copies are accounted for, but A is required when an outside A may still exist.
+
+### Void-fill Strategy When Partner Is At Risk — `voidFillCards`
+
+If the AI is void in the lead suit and partner is currently winning, `partnerAtRisk` means that larger cards in the lead suit may still be unplayed, so partner could be overtaken by a later opponent:
+
+- Use trump to protect the trick; do not discard points casually.
+- If a later opponent is also void in the lead suit (`enemySubsequentVoidInLead`) and the current trick already contains points, play the strongest trump to prevent the later opponent from re-intercepting the trick.
+- If a later opponent is also void but the trick has no points yet, use the safe-trump policy (`isSafeTrumpFiller`) instead of wasting the strongest trump.
+- If later opponents can still follow the lead suit, prefer a singleton scoring trump (10 / K / 5, without breaking pairs); if none exists, use the weakest trump.
+- If no trump is available, discard safely without giving points away.
 
 ### Partner Slam Support
 
 When the partner leads a slam of ≥ 4 cards containing pairs and is currently winning, play support cards using the tractor-follow strategy to contribute scoring cards (`safePartnerCards`).
+
+### Trumping a Slam Lead
+
+- If the lead slam is pure singles, trump interception only compares the highest single. AI prefers singleton trump cards and avoids breaking trump pairs for this case.
+- If the lead slam contains pairs or tractors, a trump interception must match the slam structure. AI builds the weakest matching tractors, pairs, then singles via `buildMatchingSlamTrump`.
 
 ### Safe Trump Play — `isSafeTrumpFiller`
 
@@ -333,6 +348,11 @@ Attacking side scores < 80 → defending side wins:
 - The host owns the full game state; clients only receive snapshots.
 - Client actions are sent as `MultiplayerAction`: `declareTrump`, `confirmKitty`, `play`.
 - The host broadcasts `GameSnapshot`; each player only receives their own hand cards.
+- Player identity in multiplayer uses the `MCPeerID` object identity, not `displayName`; multiple devices named "iPhone" must not collide or crash.
+- Lobby player count is built from the host's connection cache merged with `session.connectedPeers`, preventing stale lobby snapshots when a new player joins.
+- Only the host may advance global flow. Client "Next Round" controls are disabled.
+- Once any remote player is connected, fast dealing is disabled for the whole multiplayer room: neither host nor clients show the fast-deal button, and `toggleFastDealing` rejects multiplayer calls.
+- When the host leaves, it broadcasts `roomClosed`, disconnects all clients, and everyone returns to the main menu. If a client misses the message but detects host disconnection, it uses the same return-to-menu fallback.
 
 ---
 
