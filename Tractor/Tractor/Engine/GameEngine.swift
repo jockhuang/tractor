@@ -218,6 +218,8 @@ class GameEngine: ObservableObject {
     }
 
     func humanDeclareTrump(position: PlayerPosition, selectedIDs: Set<UUID>) {
+        guard !state.isResolvingTrick else { return }
+
         if multiplayer.isClient {
             multiplayer.sendAction(MultiplayerAction(
                 position: position,
@@ -478,6 +480,8 @@ class GameEngine: ObservableObject {
     }
 
     func confirmKittyExchange(position: PlayerPosition, selectedIDs: Set<UUID>) {
+        guard !state.isResolvingTrick else { return }
+
         if multiplayer.isClient {
             multiplayer.sendAction(MultiplayerAction(
                 position: position,
@@ -554,6 +558,7 @@ class GameEngine: ObservableObject {
 
     private func startPlaying() {
         state.phase         = .playing
+        state.isResolvingTrick = false
         state.currentLeader = state.dealerPosition
         state.currentTurn   = state.dealerPosition
         state.currentTrick  = Trick(leadPosition: state.dealerPosition)
@@ -575,6 +580,11 @@ class GameEngine: ObservableObject {
     }
 
     func humanPlay(position: PlayerPosition, selectedIDs: Set<UUID>) {
+        guard !state.isResolvingTrick else {
+            state.selectedCards = []
+            return
+        }
+
         if multiplayer.isClient {
             multiplayer.sendAction(MultiplayerAction(
                 position: position,
@@ -585,6 +595,7 @@ class GameEngine: ObservableObject {
         }
 
         guard state.phase == .playing,
+              !state.isResolvingTrick,
               state.currentTurn == position else { return }
 
         let player = state.player(position)
@@ -664,14 +675,10 @@ class GameEngine: ObservableObject {
             }
         }
 
-        syncMultiplayerState()
-
         if state.currentTrick.isComplete {
-            Task {
-                try? await Task.sleep(nanoseconds: UInt64(trickEndDelay * 1_000_000_000))
-                resolveTrick()
-            }
+            beginTrickResolution()
         } else {
+            syncMultiplayerState()
             let next = nextPosition(after: position)
             state.currentTurn = next
             syncMultiplayerState()
@@ -686,7 +693,25 @@ class GameEngine: ObservableObject {
 
     // MARK: - 结算一墩
 
+    private func beginTrickResolution() {
+        guard state.currentTrick.isComplete,
+              !state.isResolvingTrick else { return }
+
+        state.isResolvingTrick = true
+        state.phase = .trickEnd
+        state.selectedCards = []
+        syncMultiplayerState()
+
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(trickEndDelay * 1_000_000_000))
+            resolveTrick()
+        }
+    }
+
     private func resolveTrick() {
+        guard state.isResolvingTrick,
+              state.currentTrick.isComplete else { return }
+
         let evaluator = makeEvaluator()
         let winner    = evaluator.winner(of: state.currentTrick)
         let points    = state.currentTrick.plays.flatMap { $0.cards }.reduce(0) { $0 + $1.pointValue }
@@ -700,6 +725,7 @@ class GameEngine: ObservableObject {
         syncMultiplayerState()
 
         if state.players.allSatisfy({ $0.hand.isEmpty }) {
+            state.isResolvingTrick = false
             resolveRound()
             syncMultiplayerState()
             return
@@ -707,6 +733,8 @@ class GameEngine: ObservableObject {
 
         state.currentTrick        = Trick(leadPosition: winner)
         state.forcedFollowCards   = [:]   // 新的一墩，清除强制出牌
+        state.phase               = .playing
+        state.isResolvingTrick    = false
         syncMultiplayerState()
 
         if !humanControlledPositions.contains(winner) {
@@ -835,6 +863,7 @@ class GameEngine: ObservableObject {
 
     private func aiTakeTurn(position: PlayerPosition) {
         guard state.phase == .playing,
+              !state.isResolvingTrick,
               state.currentTurn == position else { return }
 
         let forcedCards = state.forcedFollowCards[position] ?? []
@@ -969,6 +998,8 @@ class GameEngine: ObservableObject {
     // MARK: - 联机同步
 
     func handleRemoteAction(_ action: MultiplayerAction) {
+        guard !state.isResolvingTrick else { return }
+
         switch action.kind {
         case .declareTrump(let selectedCardIDs):
             humanDeclareTrump(position: action.position, selectedIDs: Set(selectedCardIDs))
@@ -1004,6 +1035,7 @@ class GameEngine: ObservableObject {
             trumpDeclaration: state.trumpDeclaration,
             dealtCount: state.dealtCount,
             isDealingFast: state.isDealingFast,
+            isResolvingTrick: state.isResolvingTrick,
             dealerPosition: state.dealerPosition,
             currentTrick: trick,
             currentLeader: state.currentLeader,
@@ -1028,6 +1060,7 @@ class GameEngine: ObservableObject {
         state.trumpDeclaration = snapshot.trumpDeclaration
         state.dealtCount = snapshot.dealtCount
         state.isDealingFast = snapshot.isDealingFast
+        state.isResolvingTrick = snapshot.isResolvingTrick
         state.dealerPosition = snapshot.dealerPosition
         state.currentLeader = snapshot.currentLeader
         state.currentTurn = snapshot.currentTurn

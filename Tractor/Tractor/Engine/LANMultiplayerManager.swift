@@ -44,6 +44,7 @@ struct GameSnapshot: Codable {
     let trumpDeclaration: TrumpDeclaration?
     let dealtCount: Int
     let isDealingFast: Bool
+    let isResolvingTrick: Bool
     let dealerPosition: PlayerPosition
     let currentTrick: NetworkTrickSnapshot
     let currentLeader: PlayerPosition

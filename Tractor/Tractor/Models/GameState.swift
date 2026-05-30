@@ -106,6 +106,9 @@ class GameState: ObservableObject {
     // 历史墩
     @Published var completedTricks: [Trick] = []
 
+    // 一墩出完后的展示/结算锁。锁定期间禁止任何玩家继续操作。
+    @Published var isResolvingTrick: Bool = false
+
     // 消息提示
     @Published var message: String = ""
     @Published var lastRoundResult: RoundResult? = nil
@@ -141,6 +144,7 @@ class GameState: ObservableObject {
         lastDrawnCardId   = nil
         forcedFollowCards   = [:]
         postDealCountdown   = 0
+        isResolvingTrick    = false
         for p in players { p.hand = []; p.isDealer = false }
     }
 }
