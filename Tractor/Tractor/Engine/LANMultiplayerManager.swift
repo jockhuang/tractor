@@ -38,6 +38,7 @@ struct NetworkTrickSnapshot: Codable {
 
 struct GameSnapshot: Codable {
     let localPosition: PlayerPosition
+    let playerNames: [PlayerPosition: String]
     let phase: GamePhase
     let trumpSuit: Suit?
     let trumpRank: Rank
@@ -77,13 +78,15 @@ enum LANMessage: Codable {
 
 final class LANMultiplayerManager: NSObject, ObservableObject {
     private let serviceType = "tractor-game"
+    private let playerNameKey = "tractor.multiplayer.playerName"
 
+    @Published var localPlayerName: String
     @Published var mode: LANMode = .none
     @Published var discoveredHosts: [MCPeerID] = []
     @Published var lobby = LANLobbyState(players: [])
     @Published var statusText = ""
 
-    private let peerID = MCPeerID(displayName: UIDevice.current.name)
+    private var peerID: MCPeerID
     private var session: MCSession?
     private var advertiser: MCNearbyServiceAdvertiser?
     private var browser: MCNearbyServiceBrowser?
@@ -97,11 +100,24 @@ final class LANMultiplayerManager: NSObject, ObservableObject {
         isClient || !connectedRoomPeers().isEmpty || lobby.players.contains { !$0.isHost }
     }
 
+    override init() {
+        let savedName = UserDefaults.standard.string(forKey: playerNameKey)
+        let initialName = Self.normalizedPlayerName(savedName ?? UIDevice.current.name)
+        self.localPlayerName = initialName
+        self.peerID = MCPeerID(displayName: initialName)
+        super.init()
+    }
+
     func attach(engine: GameEngine) {
         self.engine = engine
     }
 
+    func commitLocalPlayerName() {
+        applyLocalPlayerName()
+    }
+
     func hostGame() {
+        applyLocalPlayerName()
         resetConnections()
         mode = .host
         statusText = "正在等待其他玩家加入"
@@ -118,6 +134,7 @@ final class LANMultiplayerManager: NSObject, ObservableObject {
     }
 
     func browseGames() {
+        applyLocalPlayerName()
         resetConnections()
         mode = .client
         statusText = "正在搜索局域网房间"
@@ -169,7 +186,16 @@ final class LANMultiplayerManager: NSObject, ObservableObject {
 
         let humanPositions = Set(humanPeers.compactMap { position(for: $0) })
         let hostPosition = position(for: peerID) ?? .south
-        engine.startMultiplayerGame(localPosition: hostPosition, humanPositions: humanPositions)
+        var playerNames: [PlayerPosition: String] = [:]
+        for peer in humanPeers {
+            guard let position = position(for: peer) else { continue }
+            playerNames[position] = peer.displayName
+        }
+        engine.startMultiplayerGame(
+            localPosition: hostPosition,
+            humanPositions: humanPositions,
+            playerNames: playerNames
+        )
         broadcastSnapshots()
     }
 
@@ -190,6 +216,27 @@ final class LANMultiplayerManager: NSObject, ObservableObject {
     private func startSession() {
         session = MCSession(peer: peerID, securityIdentity: nil, encryptionPreference: .required)
         session?.delegate = self
+    }
+
+    private func applyLocalPlayerName() {
+        let normalized = Self.normalizedPlayerName(localPlayerName)
+        localPlayerName = normalized
+        UserDefaults.standard.set(normalized, forKey: playerNameKey)
+        guard mode == .none else { return }
+        peerID = MCPeerID(displayName: normalized)
+    }
+
+    private static func normalizedPlayerName(_ name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallback = UIDevice.current.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = trimmed.isEmpty ? (fallback.isEmpty ? "玩家" : fallback) : trimmed
+        var result = ""
+        for character in value {
+            let candidate = result + String(character)
+            guard candidate.utf8.count <= 48 else { break }
+            result = candidate
+        }
+        return result.isEmpty ? "玩家" : result
     }
 
     private func resetConnections() {

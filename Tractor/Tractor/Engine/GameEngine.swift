@@ -53,14 +53,23 @@ class GameEngine: ObservableObject {
         state.phase = .menu
     }
 
-    func startMultiplayerGame(localPosition: PlayerPosition, humanPositions: Set<PlayerPosition>) {
+    func startMultiplayerGame(
+        localPosition: PlayerPosition,
+        humanPositions: Set<PlayerPosition>,
+        playerNames: [PlayerPosition: String] = [:]
+    ) {
         dealingTask?.cancel()
         self.localPosition = localPosition
         self.humanControlledPositions = humanPositions
         state = GameState()
+        state.playerNames = playerNames
         state.dealerTeamIdx = 0
         state.teamLevels = [0: .two, 1: .two]
         startNewRound()
+    }
+
+    func displayName(for position: PlayerPosition) -> String {
+        state.displayName(for: position)
     }
 
     func startNewRound() {
@@ -438,7 +447,7 @@ class GameEngine: ObservableObject {
         default: badge = ""
         }
         let suitStr = suit.map { $0.rawValue } ?? "无主"
-        state.message = "\(position.displayName) 亮主：\(suitStr)\(strength < 3 ? state.trumpRank.display : "") \(badge)"
+        state.message = "\(displayName(for: position)) 亮主：\(suitStr)\(strength < 3 ? state.trumpRank.display : "") \(badge)"
         syncMultiplayerState()
     }
 
@@ -467,7 +476,7 @@ class GameEngine: ObservableObject {
             dealer.hand.append(contentsOf: state.kitty)
             dealer.sortHand(trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
             state.kitty    = []
-            state.message  = "\(state.dealerPosition.displayName) 请选择 8 张牌压入底牌"
+            state.message  = "\(displayName(for: state.dealerPosition)) 请选择 8 张牌压入底牌"
             syncMultiplayerState()
         } else {
             // AI 庄家自动换底
@@ -647,7 +656,7 @@ class GameEngine: ObservableObject {
         state.player(position).play(cards: cards)
         state.currentTrick.plays.append((position: position, cards: cards))
         state.selectedCards = []
-        state.message = "\(position.displayName) 出了 \(cards.map { $0.shortDisplay }.joined(separator: " "))"
+        state.message = "\(displayName(for: position)) 出了 \(cards.map { $0.shortDisplay }.joined(separator: " "))"
 
         // 首张：检测甩牌，更新强制出牌和罚分
         // 若是人类甩牌失败，需回退出牌并让人类重新选择
@@ -721,7 +730,7 @@ class GameEngine: ObservableObject {
         state.completedTricks.append(state.currentTrick)
         state.currentLeader = winner
         state.currentTurn   = winner
-        state.message = "\(winner.displayName) 赢得本墩，+\(points) 分 | 攻方累计：\(state.attackScore) 分"
+        state.message = "\(displayName(for: winner)) 赢得本墩，+\(points) 分 | 攻方累计：\(state.attackScore) 分"
         syncMultiplayerState()
 
         if state.players.allSatisfy({ $0.hand.isEmpty }) {
@@ -919,7 +928,7 @@ class GameEngine: ObservableObject {
             let forcing = evaluator.slamForcing(slam: slam, opponentHand: opponentHands[pos]!)
             if !forcing.isEmpty {
                 let display = forcing.resolvedForcedCards.map { $0.shortDisplay }.joined(separator: " ")
-                forcedParts.append("\(pos.displayName)有[\(display)]")
+                forcedParts.append("\(displayName(for: pos))有[\(display)]")
             }
         }
         state.message = "甩牌失败 -\(penalty)分（\(forcedParts.joined(separator: "，"))），请重新出牌"
@@ -982,7 +991,7 @@ class GameEngine: ObservableObject {
         // 记录强制出牌
         if !forced.isEmpty {
             state.forcedFollowCards = forced
-            let names = forced.keys.map { $0.displayName }.joined(separator: "、")
+            let names = forced.keys.map { displayName(for: $0) }.joined(separator: "、")
             state.message += "  [\(names) 被强制出牌]"
         }
     }
@@ -1029,6 +1038,7 @@ class GameEngine: ObservableObject {
 
         return GameSnapshot(
             localPosition: position,
+            playerNames: state.playerNames,
             phase: state.phase,
             trumpSuit: state.trumpSuit,
             trumpRank: state.trumpRank,
@@ -1055,6 +1065,7 @@ class GameEngine: ObservableObject {
         humanControlledPositions = [snapshot.localPosition]
 
         state.phase = snapshot.phase
+        state.playerNames = snapshot.playerNames
         state.trumpSuit = snapshot.trumpSuit
         state.trumpRank = snapshot.trumpRank
         state.trumpDeclaration = snapshot.trumpDeclaration

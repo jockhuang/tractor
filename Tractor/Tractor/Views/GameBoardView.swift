@@ -175,6 +175,7 @@ struct GameBoardView: View {
                     tricks: state.completedTricks,
                     trumpSuit: state.trumpSuit,
                     trumpRank: state.trumpRank,
+                    playerNames: state.playerNames,
                     onClose: { showHistory = false }
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.97)))
@@ -228,9 +229,11 @@ struct GameBoardView: View {
                 if state.dealerPosition == position {
                     Text("👑").font(.system(size: 11))
                 }
-                Text("\(position.displayName)  \(state.player(position).hand.count)张")
+                Text("\(displayName(for: position))  \(state.player(position).hand.count)张")
                     .font(.caption2)
                     .foregroundColor(.white.opacity(0.8))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
         }
         .padding(.horizontal, 12)
@@ -280,9 +283,11 @@ struct GameBoardView: View {
                 if state.dealerPosition == position {
                     Text("👑").font(.system(size: 10))
                 }
-                Text(position.displayName)
+                Text(displayName(for: position))
                     .font(.caption2.bold())
                     .foregroundColor(.white.opacity(0.8))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
             Text("\(count)张")
                 .font(.system(size: 10))
@@ -329,9 +334,11 @@ struct GameBoardView: View {
                 if state.dealerPosition == localPosition {
                     Text("👑").font(.system(size: 11))
                 }
-                Text("我（\(localPosition.displayName)）")
+                Text(localPlayerLabel)
                     .font(.system(size: 11))
                     .foregroundColor(.white.opacity(0.6))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                 Spacer()
             }
             .padding(.horizontal, 14)
@@ -361,9 +368,11 @@ struct GameBoardView: View {
                         if state.dealerPosition == localPosition {
                             Text("👑").font(.system(size: 12))
                         }
-                        Text("我（\(localPosition.displayName)）")
+                        Text(localPlayerLabel)
                             .font(.caption.bold())
                             .foregroundColor(.white.opacity(0.85))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                     }
                     Spacer()
                     Button(action: {
@@ -416,6 +425,18 @@ struct GameBoardView: View {
             .padding(.vertical, 3)
             .background(color)
             .clipShape(Capsule())
+    }
+
+    private var localPlayerLabel: String {
+        let name = displayName(for: localPosition)
+        if engine.multiplayer.mode != .none || !state.playerNames.isEmpty {
+            return "\(name)（\(localPosition.seatName)）"
+        }
+        return name
+    }
+
+    private func displayName(for position: PlayerPosition) -> String {
+        state.displayName(for: position)
     }
 
     private func relativePosition(offset: Int) -> PlayerPosition {

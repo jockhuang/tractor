@@ -5,6 +5,7 @@ struct TrickHistoryPanel: View {
     let tricks: [Trick]
     let trumpSuit: Suit?
     let trumpRank: Rank
+    let playerNames: [PlayerPosition: String]
     let onClose: () -> Void
 
     private var evaluator: TrickEvaluator {
@@ -49,7 +50,8 @@ struct TrickHistoryPanel: View {
                             TrickHistoryRow(
                                 index: idx + 1,
                                 trick: trick,
-                                winner: evaluator.winner(of: trick)
+                                winner: evaluator.winner(of: trick),
+                                playerNames: playerNames
                             )
                             if idx < tricks.count - 1 {
                                 Divider().background(Color.white.opacity(0.08))
@@ -73,6 +75,7 @@ private struct TrickHistoryRow: View {
     let index: Int
     let trick: Trick
     let winner: PlayerPosition
+    let playerNames: [PlayerPosition: String]
 
     var body: some View {
         HStack(alignment: .center, spacing: 0) {
@@ -83,10 +86,12 @@ private struct TrickHistoryRow: View {
                 .frame(width: 30, alignment: .leading)
 
             // 先手标记
-            Text(trick.leadPosition.displayName)
+            Text(displayName(for: trick.leadPosition))
                 .font(.system(size: 10))
                 .foregroundColor(.white.opacity(0.5))
-                .frame(width: 26, alignment: .center)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(width: 42, alignment: .center)
 
             // 四家出牌
             ForEach(orderedPlays, id: \.position.rawValue) { play in
@@ -100,11 +105,13 @@ private struct TrickHistoryRow: View {
                 Image(systemName: "crown.fill")
                     .font(.system(size: 9))
                     .foregroundColor(.yellow)
-                Text(winner.displayName)
+                Text(displayName(for: winner))
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.yellow)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
-            .frame(width: 44, alignment: .trailing)
+            .frame(width: 64, alignment: .trailing)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
@@ -124,10 +131,12 @@ private struct TrickHistoryRow: View {
     @ViewBuilder
     private func playerColumn(play: (position: PlayerPosition, cards: [Card])) -> some View {
         VStack(alignment: .center, spacing: 2) {
-            Text(play.position.displayName)
+            Text(displayName(for: play.position))
                 .font(.system(size: 9))
                 .foregroundColor(play.position == trick.leadPosition
                     ? .white.opacity(0.8) : .white.opacity(0.4))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
 
             // 牌列表（横排，最多显示 4 张，再多就省略）
             let display = play.cards.prefix(4)
@@ -151,6 +160,12 @@ private struct TrickHistoryRow: View {
             }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private func displayName(for position: PlayerPosition) -> String {
+        let name = playerNames[position]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !name.isEmpty { return name }
+        return playerNames.isEmpty ? position.displayName : position.seatName
     }
 
     private func cardChip(card: Card) -> some View {

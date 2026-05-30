@@ -81,6 +81,9 @@ class GameState: ObservableObject {
     // 庄家位置（每局开始时确定）
     @Published var dealerPosition: PlayerPosition = .south
 
+    // 联机玩家名：按座位保存。未设置时使用单机默认方位名。
+    @Published var playerNames: [PlayerPosition: String] = [:]
+
     // 当前局状态
     @Published var kitty: [Card] = []
     @Published var currentTrick: Trick = Trick(leadPosition: .south)
@@ -125,6 +128,12 @@ class GameState: ObservableObject {
     func teamLevel(_ team: Int) -> Rank { teamLevels[team] ?? .two }
     var currentDealerTeamLevel: Rank { teamLevel(dealerTeamIdx) }
     var attackTeamIdx: Int { 1 - dealerTeamIdx }
+
+    func displayName(for position: PlayerPosition) -> String {
+        let name = playerNames[position]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !name.isEmpty { return name }
+        return playerNames.isEmpty ? position.displayName : position.seatName
+    }
 
     /// 亮主强度（0=无，1=单张，2=对子）
     var declarationStrength: Int { trumpDeclaration?.strength ?? 0 }
