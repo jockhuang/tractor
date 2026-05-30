@@ -53,14 +53,23 @@ class GameEngine: ObservableObject {
         state.phase = .menu
     }
 
-    func startMultiplayerGame(localPosition: PlayerPosition, humanPositions: Set<PlayerPosition>) {
+    func startMultiplayerGame(
+        localPosition: PlayerPosition,
+        humanPositions: Set<PlayerPosition>,
+        playerNames: [PlayerPosition: String] = [:]
+    ) {
         dealingTask?.cancel()
         self.localPosition = localPosition
         self.humanControlledPositions = humanPositions
         state = GameState()
+        state.playerNames = playerNames
         state.dealerTeamIdx = 0
         state.teamLevels = [0: .two, 1: .two]
         startNewRound()
+    }
+
+    func displayName(for position: PlayerPosition) -> String {
+        state.displayName(for: position)
     }
 
     func startNewRound() {
@@ -218,6 +227,8 @@ class GameEngine: ObservableObject {
     }
 
     func humanDeclareTrump(position: PlayerPosition, selectedIDs: Set<UUID>) {
+        guard !state.isResolvingTrick else { return }
+
         if multiplayer.isClient {
             multiplayer.sendAction(MultiplayerAction(
                 position: position,
@@ -436,7 +447,7 @@ class GameEngine: ObservableObject {
         default: badge = ""
         }
         let suitStr = suit.map { $0.rawValue } ?? "无主"
-        state.message = "\(position.displayName) 亮主：\(suitStr)\(strength < 3 ? state.trumpRank.display : "") \(badge)"
+        state.message = "\(displayName(for: position)) 亮主：\(suitStr)\(strength < 3 ? state.trumpRank.display : "") \(badge)"
         syncMultiplayerState()
     }
 
@@ -465,7 +476,7 @@ class GameEngine: ObservableObject {
             dealer.hand.append(contentsOf: state.kitty)
             dealer.sortHand(trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
             state.kitty    = []
-            state.message  = "\(state.dealerPosition.displayName) 请选择 8 张牌压入底牌"
+            state.message  = "\(displayName(for: state.dealerPosition)) 请选择 8 张牌压入底牌"
             syncMultiplayerState()
         } else {
             // AI 庄家自动换底
@@ -478,6 +489,8 @@ class GameEngine: ObservableObject {
     }
 
     func confirmKittyExchange(position: PlayerPosition, selectedIDs: Set<UUID>) {
+        guard !state.isResolvingTrick else { return }
+
         if multiplayer.isClient {
             multiplayer.sendAction(MultiplayerAction(
                 position: position,
@@ -554,6 +567,7 @@ class GameEngine: ObservableObject {
 
     private func startPlaying() {
         state.phase         = .playing
+        state.isResolvingTrick = false
         state.currentLeader = state.dealerPosition
         state.currentTurn   = state.dealerPosition
         state.currentTrick  = Trick(leadPosition: state.dealerPosition)
@@ -575,6 +589,11 @@ class GameEngine: ObservableObject {
     }
 
     func humanPlay(position: PlayerPosition, selectedIDs: Set<UUID>) {
+        guard !state.isResolvingTrick else {
+            state.selectedCards = []
+            return
+        }
+
         if multiplayer.isClient {
             multiplayer.sendAction(MultiplayerAction(
                 position: position,
@@ -585,6 +604,7 @@ class GameEngine: ObservableObject {
         }
 
         guard state.phase == .playing,
+              !state.isResolvingTrick,
               state.currentTurn == position else { return }
 
         let player = state.player(position)
@@ -636,7 +656,7 @@ class GameEngine: ObservableObject {
         state.player(position).play(cards: cards)
         state.currentTrick.plays.append((position: position, cards: cards))
         state.selectedCards = []
-        state.message = "\(position.displayName) 出了 \(cards.map { $0.shortDisplay }.joined(separator: " "))"
+        state.message = "\(displayName(for: position)) 出了 \(cards.map { $0.shortDisplay }.joined(separator: " "))"
 
         // 首张：检测甩牌，更新强制出牌和罚分
         // 若是人类甩牌失败，需回退出牌并让人类重新选择
@@ -664,14 +684,10 @@ class GameEngine: ObservableObject {
             }
         }
 
-        syncMultiplayerState()
-
         if state.currentTrick.isComplete {
-            Task {
-                try? await Task.sleep(nanoseconds: UInt64(trickEndDelay * 1_000_000_000))
-                resolveTrick()
-            }
+            beginTrickResolution()
         } else {
+            syncMultiplayerState()
             let next = nextPosition(after: position)
             state.currentTurn = next
             syncMultiplayerState()
@@ -686,7 +702,25 @@ class GameEngine: ObservableObject {
 
     // MARK: - 结算一墩
 
+    private func beginTrickResolution() {
+        guard state.currentTrick.isComplete,
+              !state.isResolvingTrick else { return }
+
+        state.isResolvingTrick = true
+        state.phase = .trickEnd
+        state.selectedCards = []
+        syncMultiplayerState()
+
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(trickEndDelay * 1_000_000_000))
+            resolveTrick()
+        }
+    }
+
     private func resolveTrick() {
+        guard state.isResolvingTrick,
+              state.currentTrick.isComplete else { return }
+
         let evaluator = makeEvaluator()
         let winner    = evaluator.winner(of: state.currentTrick)
         let points    = state.currentTrick.plays.flatMap { $0.cards }.reduce(0) { $0 + $1.pointValue }
@@ -696,10 +730,11 @@ class GameEngine: ObservableObject {
         state.completedTricks.append(state.currentTrick)
         state.currentLeader = winner
         state.currentTurn   = winner
-        state.message = "\(winner.displayName) 赢得本墩，+\(points) 分 | 攻方累计：\(state.attackScore) 分"
+        state.message = "\(displayName(for: winner)) 赢得本墩，+\(points) 分 | 攻方累计：\(state.attackScore) 分"
         syncMultiplayerState()
 
         if state.players.allSatisfy({ $0.hand.isEmpty }) {
+            state.isResolvingTrick = false
             resolveRound()
             syncMultiplayerState()
             return
@@ -707,6 +742,8 @@ class GameEngine: ObservableObject {
 
         state.currentTrick        = Trick(leadPosition: winner)
         state.forcedFollowCards   = [:]   // 新的一墩，清除强制出牌
+        state.phase               = .playing
+        state.isResolvingTrick    = false
         syncMultiplayerState()
 
         if !humanControlledPositions.contains(winner) {
@@ -835,6 +872,7 @@ class GameEngine: ObservableObject {
 
     private func aiTakeTurn(position: PlayerPosition) {
         guard state.phase == .playing,
+              !state.isResolvingTrick,
               state.currentTurn == position else { return }
 
         let forcedCards = state.forcedFollowCards[position] ?? []
@@ -890,7 +928,7 @@ class GameEngine: ObservableObject {
             let forcing = evaluator.slamForcing(slam: slam, opponentHand: opponentHands[pos]!)
             if !forcing.isEmpty {
                 let display = forcing.resolvedForcedCards.map { $0.shortDisplay }.joined(separator: " ")
-                forcedParts.append("\(pos.displayName)有[\(display)]")
+                forcedParts.append("\(displayName(for: pos))有[\(display)]")
             }
         }
         state.message = "甩牌失败 -\(penalty)分（\(forcedParts.joined(separator: "，"))），请重新出牌"
@@ -953,7 +991,7 @@ class GameEngine: ObservableObject {
         // 记录强制出牌
         if !forced.isEmpty {
             state.forcedFollowCards = forced
-            let names = forced.keys.map { $0.displayName }.joined(separator: "、")
+            let names = forced.keys.map { displayName(for: $0) }.joined(separator: "、")
             state.message += "  [\(names) 被强制出牌]"
         }
     }
@@ -969,6 +1007,8 @@ class GameEngine: ObservableObject {
     // MARK: - 联机同步
 
     func handleRemoteAction(_ action: MultiplayerAction) {
+        guard !state.isResolvingTrick else { return }
+
         switch action.kind {
         case .declareTrump(let selectedCardIDs):
             humanDeclareTrump(position: action.position, selectedIDs: Set(selectedCardIDs))
@@ -998,12 +1038,14 @@ class GameEngine: ObservableObject {
 
         return GameSnapshot(
             localPosition: position,
+            playerNames: state.playerNames,
             phase: state.phase,
             trumpSuit: state.trumpSuit,
             trumpRank: state.trumpRank,
             trumpDeclaration: state.trumpDeclaration,
             dealtCount: state.dealtCount,
             isDealingFast: state.isDealingFast,
+            isResolvingTrick: state.isResolvingTrick,
             dealerPosition: state.dealerPosition,
             currentTrick: trick,
             currentLeader: state.currentLeader,
@@ -1023,11 +1065,13 @@ class GameEngine: ObservableObject {
         humanControlledPositions = [snapshot.localPosition]
 
         state.phase = snapshot.phase
+        state.playerNames = snapshot.playerNames
         state.trumpSuit = snapshot.trumpSuit
         state.trumpRank = snapshot.trumpRank
         state.trumpDeclaration = snapshot.trumpDeclaration
         state.dealtCount = snapshot.dealtCount
         state.isDealingFast = snapshot.isDealingFast
+        state.isResolvingTrick = snapshot.isResolvingTrick
         state.dealerPosition = snapshot.dealerPosition
         state.currentLeader = snapshot.currentLeader
         state.currentTurn = snapshot.currentTurn

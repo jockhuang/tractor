@@ -102,7 +102,7 @@ struct MenuView: View {
             VStack {
                 Spacer()
                 HStack {
-                    Text("版本 1.0  ·  南北 vs 东西")
+                    Text("版本 1.01  ·  南北 vs 东西")
                         .font(.caption)
                         .foregroundColor(.white.opacity(0.4))
 
@@ -177,6 +177,22 @@ struct LANLobbyView: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("联机名字")
+                        .font(.headline)
+                    TextField("输入你的名字", text: $multiplayer.localPlayerName)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(multiplayer.mode != .none)
+                        .onSubmit {
+                            multiplayer.commitLocalPlayerName()
+                        }
+                    if multiplayer.mode != .none {
+                        Text("断开当前房间后可修改名字。")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
                 HStack(spacing: 12) {
                     Button(action: { multiplayer.hostGame() }) {
                         Label("发起房间", systemImage: "antenna.radiowaves.left.and.right")
@@ -225,7 +241,7 @@ struct LANLobbyView: View {
                                 .foregroundColor(player.isHost ? .yellow : .blue)
                             Text(player.name)
                             Spacer()
-                            Text(player.position?.displayName ?? "待分配")
+                            Text(player.position?.seatName ?? "待分配")
                                 .font(.caption.bold())
                                 .foregroundColor(.secondary)
                         }

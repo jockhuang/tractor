@@ -18,6 +18,15 @@ enum PlayerPosition: Int, CaseIterable, Codable {
         }
     }
 
+    var seatName: String {
+        switch self {
+        case .south: return "南"
+        case .west:  return "西"
+        case .north: return "北"
+        case .east:  return "东"
+        }
+    }
+
     var isHuman: Bool { self == .south }
 
     /// 视图布局位置描述

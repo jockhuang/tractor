@@ -116,9 +116,11 @@ struct DealingOverlayView: View {
                             .font(.system(size: 14))
                     }
                     VStack(alignment: .leading, spacing: 0) {
-                        Text(decl.declarer.displayName)
+                        Text(engine.displayName(for: decl.declarer))
                             .font(.system(size: 9))
                             .foregroundColor(.white.opacity(0.6))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                         Text(badgeLabel(decl.strength))
                             .font(.system(size: 10, weight: .bold))
                             .foregroundColor(.yellow)
