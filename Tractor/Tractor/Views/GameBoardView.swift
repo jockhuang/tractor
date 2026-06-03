@@ -44,6 +44,9 @@ struct GameBoardView: View {
     }
 
     var body: some View {
+        GeometryReader { proxy in
+            let metrics = GameBoardMetrics(size: proxy.size)
+
         ZStack {
             // ── 横屏主布局 ──────────────────────────────
             VStack(spacing: 0) {
@@ -52,29 +55,31 @@ struct GameBoardView: View {
                 HStack(spacing: 0) {
 
                     // 左侧玩家
-                    sideAIArea(position: leftPosition)
-                        .frame(width: 72)
+                    sideAIArea(position: leftPosition, metrics: metrics)
+                        .frame(width: metrics.sideRailWidth)
 
                     // 中央：对家 + 桌面
                     VStack(spacing: 0) {
-                        topAIArea(position: topPosition)
-                            .padding(.top, 4)
+                        topAIArea(position: topPosition, metrics: metrics)
+                            .padding(.top, metrics.topPlayerPadding)
 
                         // 桌面中央
-                        centerArea
+                        centerArea(metrics: metrics)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                     // 右侧玩家
-                    sideAIArea(position: rightPosition)
-                        .frame(width: 72)
+                    sideAIArea(position: rightPosition, metrics: metrics)
+                        .frame(width: metrics.sideRailWidth)
                 }
                 .frame(maxHeight: .infinity)
 
                 // 南家手牌区（包含发牌/换底信息栏）
-                southArea
+                southArea(metrics: metrics)
             }
+            .frame(maxWidth: metrics.boardMaxWidth, maxHeight: .infinity)
+            .frame(maxWidth: .infinity)
 
             // 局结算覆层
             if let result = state.lastRoundResult, state.phase == .roundEnd {
@@ -180,8 +185,8 @@ struct GameBoardView: View {
                             .clipShape(Circle())
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.top, 6)
+                .padding(.horizontal, metrics.overlayHorizontalPadding)
+                .padding(.top, metrics.overlayTopPadding)
 
                 Spacer()
             }
@@ -204,7 +209,7 @@ struct GameBoardView: View {
                 VStack {
                     Spacer()
                     Text(state.message)
-                        .font(.system(size: 12))
+                        .font(.system(size: metrics.messageFontSize))
                         .foregroundColor(.white.opacity(0.92))
                         .lineLimit(2)
                         .multilineTextAlignment(.center)
@@ -232,17 +237,18 @@ struct GameBoardView: View {
         .animation(.easeInOut(duration: 0.3), value: state.phase)
         .animation(.easeInOut(duration: 0.2), value: showHistory)
         .animation(.easeInOut(duration: 0.25), value: state.message)
+        }
     }
 
     // MARK: - 对家（横屏顶部，水平展示）
-    private func topAIArea(position: PlayerPosition) -> some View {
+    private func topAIArea(position: PlayerPosition, metrics: GameBoardMetrics) -> some View {
         HStack(spacing: 8) {
             if state.currentTurn == position {
                 Image(systemName: "ellipsis")
                     .font(.caption)
                     .foregroundColor(.yellow)
             }
-            MiniCardBack(count: state.player(position).hand.count, cardHeight: 28)
+            MiniCardBack(count: state.player(position).hand.count, cardHeight: metrics.topMiniCardHeight)
             HStack(spacing: 3) {
                 if state.dealerPosition == position {
                     Text("👑").font(.system(size: 11))
@@ -265,7 +271,7 @@ struct GameBoardView: View {
     }
 
     // MARK: - 侧方 AI（西/东，竖排显示）
-    private func sideAIArea(position: PlayerPosition) -> some View {
+    private func sideAIArea(position: PlayerPosition, metrics: GameBoardMetrics) -> some View {
         let isActive = state.currentTurn == position
         let count = state.player(position).hand.count
 
@@ -292,11 +298,12 @@ struct GameBoardView: View {
                             endPoint: .bottomTrailing
                         ))
                         .frame(width: 30, height: 44)
-                        .offset(y: CGFloat(i) * 3 - CGFloat(min(count, 6)) * 1.5)
+                        .scaleEffect(metrics.sideCardScale)
+                        .offset(y: (CGFloat(i) * 3 - CGFloat(min(count, 6)) * 1.5) * metrics.sideCardScale)
                         .shadow(color: .black.opacity(0.2), radius: 1)
                 }
             }
-            .frame(height: 60)
+            .frame(height: 60 * metrics.sideCardScale)
             HStack(spacing: 2) {
                 if state.dealerPosition == position {
                     Text("👑").font(.system(size: 10))
@@ -321,13 +328,14 @@ struct GameBoardView: View {
     }
 
     // MARK: - 中央桌面
-    private var centerArea: some View {
+    private func centerArea(metrics: GameBoardMetrics) -> some View {
         ZStack(alignment: .bottom) {
             TrickAreaView(
                 trick: state.currentTrick,
                 trumpSuit: state.trumpSuit,
                 trumpRank: state.trumpRank,
-                localPosition: localPosition
+                localPosition: localPosition,
+                layoutScale: metrics.trickAreaScale
             )
             if state.currentTurn == localPosition && state.phase == .playing {
                 Text("轮到你出牌")
@@ -344,7 +352,7 @@ struct GameBoardView: View {
     }
 
     // MARK: - 南家手牌区
-    private var southArea: some View {
+    private func southArea(metrics: GameBoardMetrics) -> some View {
         VStack(spacing: 0) {
 
             // ── 常驻：南家标识（含庄家皇冠）────────────
@@ -426,7 +434,8 @@ struct GameBoardView: View {
                     (state.phase == .playing || state.phase == .kittyExchange),
                 canSelect: state.phase == .playing || state.phase == .kittyExchange
                     || state.phase == .dealing,
-                lastDrawnCardId: state.lastDrawnCardId
+                lastDrawnCardId: state.lastDrawnCardId,
+                cardScale: metrics.handCardScale
             )
             .background(Color.black.opacity(0.12))
         }
@@ -460,6 +469,57 @@ struct GameBoardView: View {
         let order: [PlayerPosition] = [.south, .west, .north, .east]
         let localIndex = order.firstIndex(of: localPosition) ?? 0
         return order[(localIndex + offset) % order.count]
+    }
+}
+
+private struct GameBoardMetrics {
+    let size: CGSize
+
+    private var isTabletCanvas: Bool {
+        size.width >= 900 && size.height >= 600
+    }
+
+    var boardMaxWidth: CGFloat {
+        isTabletCanvas ? min(size.width, 1180) : .infinity
+    }
+
+    var sideRailWidth: CGFloat {
+        isTabletCanvas ? min(108, max(86, size.width * 0.085)) : 72
+    }
+
+    var topPlayerPadding: CGFloat {
+        isTabletCanvas ? 10 : 4
+    }
+
+    var overlayHorizontalPadding: CGFloat {
+        isTabletCanvas ? 18 : 10
+    }
+
+    var overlayTopPadding: CGFloat {
+        isTabletCanvas ? 12 : 6
+    }
+
+    var messageFontSize: CGFloat {
+        isTabletCanvas ? 14 : 12
+    }
+
+    var handCardScale: CGFloat {
+        guard isTabletCanvas else { return 1 }
+        return min(1.22, max(1.12, size.height / 680))
+    }
+
+    var trickAreaScale: CGFloat {
+        guard isTabletCanvas else { return 1 }
+        return min(1.42, max(1.24, size.height / 580))
+    }
+
+    var sideCardScale: CGFloat {
+        guard isTabletCanvas else { return 1 }
+        return min(1.18, max(1.05, size.height / 720))
+    }
+
+    var topMiniCardHeight: CGFloat {
+        isTabletCanvas ? 34 : 28
     }
 }
 

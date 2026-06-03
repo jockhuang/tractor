@@ -6,13 +6,14 @@ struct TrickAreaView: View {
     let trumpSuit: Suit?
     let trumpRank: Rank
     var localPosition: PlayerPosition = .south
+    var layoutScale: CGFloat = 1
 
     var body: some View {
         ZStack {
             // 底部绿桌
             RoundedRectangle(cornerRadius: 16)
                 .fill(Color(red: 0.13, green: 0.45, blue: 0.18).opacity(0.6))
-                .frame(width: 260, height: 200)
+                .frame(width: 260 * layoutScale, height: 200 * layoutScale)
 
             // 四个方向的出牌区
             ForEach(trick.plays, id: \.position.rawValue) { play in
@@ -24,9 +25,9 @@ struct TrickAreaView: View {
     @ViewBuilder
     private func playArea(position: PlayerPosition, cards: [Card]) -> some View {
         let offset = offsetFor(position: position)
-        HStack(spacing: -18) {
+        HStack(spacing: -18 * layoutScale) {
             ForEach(cards) { card in
-                CardView(card: card, isSmall: true)
+                CardView(card: card, isSmall: true, sizeScale: layoutScale)
             }
         }
         .offset(x: offset.x, y: offset.y)
@@ -34,10 +35,10 @@ struct TrickAreaView: View {
 
     private func offsetFor(position: PlayerPosition) -> CGPoint {
         switch relativeIndex(of: position) {
-        case 0: return CGPoint(x: 0,    y:  58)
-        case 1: return CGPoint(x: -110, y:   0)
-        case 2: return CGPoint(x: 0,    y: -58)
-        default: return CGPoint(x:  110, y:   0)
+        case 0: return CGPoint(x: 0, y: 58 * layoutScale)
+        case 1: return CGPoint(x: -110 * layoutScale, y: 0)
+        case 2: return CGPoint(x: 0, y: -58 * layoutScale)
+        default: return CGPoint(x: 110 * layoutScale, y: 0)
         }
     }
 
