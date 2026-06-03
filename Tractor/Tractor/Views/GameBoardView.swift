@@ -24,6 +24,24 @@ struct GameBoardView: View {
     private var historyBgColor: Color {
         showHistory ? Color.blue.opacity(0.7) : Color.black.opacity(0.55)
     }
+    private var requiredPlayCardCount: Int? {
+        state.currentTrick.leadCards?.count
+    }
+    private var canSubmitPlay: Bool {
+        guard state.phase == .playing,
+              state.currentTurn == localPosition else { return false }
+
+        if let required = requiredPlayCardCount {
+            return state.selectedCards.count == required
+        }
+        return !state.selectedCards.isEmpty
+    }
+    private var playButtonTitle: String {
+        if let required = requiredPlayCardCount {
+            return "出牌 (\(state.selectedCards.count)/\(required)张)"
+        }
+        return "出牌 (\(state.selectedCards.count)张)"
+    }
 
     var body: some View {
         ZStack {
@@ -380,18 +398,17 @@ struct GameBoardView: View {
                     }) {
                         HStack(spacing: 5) {
                             Image(systemName: "play.fill").font(.caption2)
-                            Text("出牌 (\(state.selectedCards.count)张)")
+                            Text(playButtonTitle)
                                 .font(.caption.bold())
                         }
                         .foregroundColor(.white)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 7)
-                        .background(state.selectedCards.isEmpty
-                            ? Color.gray.opacity(0.5) : Color.blue)
+                        .background(canSubmitPlay ? Color.blue : Color.gray.opacity(0.5))
                         .clipShape(Capsule())
                         .shadow(color: .blue.opacity(0.3), radius: 3)
                     }
-                    .disabled(state.selectedCards.isEmpty || state.currentTurn != localPosition)
+                    .disabled(!canSubmitPlay)
                     .opacity(state.currentTurn == localPosition ? 1 : 0)
                 }
                 .padding(.horizontal, 14)
