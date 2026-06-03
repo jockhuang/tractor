@@ -456,8 +456,8 @@ struct AIPlayer {
                     ) {
                         chosen = [guardCard]
                     } else {
-                        chosen = safePartnerCards(from: suitCards, count: count,
-                                                  trumpSuit: ts, trumpRank: tr, ctx: ctx)
+                        chosen = partnerSupportCards(from: suitCards, count: count,
+                                                     trumpSuit: ts, trumpRank: tr)
                     }
                 }
             } else if shouldAvoidPointsWhenFollowing {
@@ -958,8 +958,8 @@ struct AIPlayer {
                 }).first {
                     return weakestPair   // 出最弱对子，保留大牌
                 }
-                return safePartnerCards(from: suitCards, count: 2,
-                                        trumpSuit: trumpSuit, trumpRank: trumpRank, ctx: ctx)
+                return partnerSupportCards(from: suitCards, count: 2,
+                                           trumpSuit: trumpSuit, trumpRank: trumpRank)
             }
             if let winningPair = pairRepresentative(of: winningCards,
                                                     trumpSuit: trumpSuit, trumpRank: trumpRank) {
@@ -1037,8 +1037,8 @@ struct AIPlayer {
             // 无对子要求（纯散牌甩牌）：直接出最弱的
             if requiredPairs == 0 {
                 return partnerWinning
-                    ? safePartnerCards(from: suitCards, count: count,
-                                       trumpSuit: ts, trumpRank: tr, ctx: ctx)
+                    ? partnerSupportCards(from: suitCards, count: count,
+                                          trumpSuit: ts, trumpRank: tr)
                     : weakestCards(from: suitCards, count: count, trumpSuit: ts, trumpRank: tr)
             }
 
@@ -1054,8 +1054,8 @@ struct AIPlayer {
             let fillCount = count - pairPart.count
             guard fillCount > 0 else { return Array(pairPart.prefix(count)) }
             let fill = partnerWinning
-                ? safePartnerCards(from: leftover, count: fillCount,
-                                   trumpSuit: ts, trumpRank: tr, ctx: ctx)
+                ? partnerSupportCards(from: leftover, count: fillCount,
+                                      trumpSuit: ts, trumpRank: tr)
                 : weakestCards(from: leftover, count: fillCount, trumpSuit: ts, trumpRank: tr)
             return pairPart + fill
         }
