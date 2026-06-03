@@ -7,13 +7,15 @@ struct PlayerHandView: View {
     var canSelect: Bool = true
     var maxVisible: Int = 25
     var lastDrawnCardId: UUID? = nil  // 发牌动画：最新一张牌浮起
+    var cardScale: CGFloat = 1
 
-    private let cardWidth: CGFloat = 64
-    private let cardHeight: CGFloat = 90
-    private let selectedCardLift: CGFloat = 12
-    private let drawnCardLift: CGFloat = 10
-    private let verticalPadding: CGFloat = 16
     private let overlapFactor: CGFloat = 0.55  // 叠牌重叠比例
+
+    private var cardWidth: CGFloat { 64 * cardScale }
+    private var cardHeight: CGFloat { 90 * cardScale }
+    private var selectedCardLift: CGFloat { 12 * cardScale }
+    private var drawnCardLift: CGFloat { 10 * cardScale }
+    private var verticalPadding: CGFloat { 16 * cardScale }
 
     private var topPadding: CGFloat {
         verticalPadding + max(selectedCardLift, drawnCardLift)
@@ -34,7 +36,8 @@ struct PlayerHandView: View {
                 ForEach(Array(cards.enumerated()), id: \.element.id) { _, card in
                     CardView(
                         card: card,
-                        isSelected: selectedCards.contains(card.id)
+                        isSelected: selectedCards.contains(card.id),
+                        sizeScale: cardScale
                     )
                     .offset(y: cardOffset(for: card))
                     .onTapGesture {

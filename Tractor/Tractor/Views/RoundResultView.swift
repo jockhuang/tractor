@@ -12,61 +12,76 @@ struct RoundResultView: View {
     private let kittyBottomPadding: CGFloat = 10
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.6)
-                .ignoresSafeArea()
+        GeometryReader { proxy in
+            let metrics = RoundResultMetrics(size: proxy.size)
 
-            ScrollView {
-                VStack(spacing: 24) {
-                    // 标题
-                    Text(result.attackTeamWon ? "🎉 攻方胜利" : "🏆 庄家方守住")
-                        .font(.title.bold())
-                        .foregroundColor(result.attackTeamWon ? .yellow : .cyan)
+            ZStack {
+                Color.black.opacity(0.6)
+                    .ignoresSafeArea()
 
-                    // 底牌展示
-                    kittySection
+                ViewThatFits(in: .vertical) {
+                    resultContent(metrics: metrics)
+                        .padding(metrics.contentPadding)
+                        .frame(width: metrics.panelWidth)
+                        .background(panelBackground)
 
-                    // 当前级别
-                    HStack(spacing: 32) {
-                        teamLevel(name: "南北", team: 0)
-                        teamLevel(name: "东西", team: 1)
+                    ScrollView {
+                        resultContent(metrics: metrics)
+                            .padding(metrics.contentPadding)
                     }
-
-                    // 按钮
-                    HStack(spacing: 20) {
-                        Button(action: onQuit) {
-                            Text("退出")
-                                .font(.headline)
-                                .foregroundColor(.white.opacity(0.8))
-                                .padding(.horizontal, 28)
-                                .padding(.vertical, 12)
-                                .background(Color.white.opacity(0.15))
-                                .clipShape(Capsule())
-                        }
-
-                        Button(action: onNext) {
-                            Text("下一局 →")
-                                .font(.headline.bold())
-                                .foregroundColor(canStartNext ? .white : .white.opacity(0.45))
-                                .padding(.horizontal, 28)
-                                .padding(.vertical, 12)
-                                .background(canStartNext ? Color.blue : Color.gray.opacity(0.45))
-                                .clipShape(Capsule())
-                        }
-                        .disabled(!canStartNext)
-                    }
+                    .frame(width: metrics.panelWidth)
+                    .frame(maxHeight: metrics.panelMaxHeight)
+                    .background(panelBackground)
                 }
-                .padding(28)
+                .padding(.horizontal, metrics.outerHorizontalPadding)
             }
-            .background(
-                RoundedRectangle(cornerRadius: 24)
-                    .fill(Color(red: 0.1, green: 0.15, blue: 0.3))
-            )
-            .padding(.horizontal, 24)
         }
     }
 
     // MARK: - 底牌展示区
+
+    private var panelBackground: some View {
+        RoundedRectangle(cornerRadius: 24)
+            .fill(Color(red: 0.1, green: 0.15, blue: 0.3))
+    }
+
+    private func resultContent(metrics: RoundResultMetrics) -> some View {
+        VStack(spacing: metrics.contentSpacing) {
+            Text(result.attackTeamWon ? "🎉 攻方胜利" : "🏆 庄家方守住")
+                .font(metrics.titleFont)
+                .foregroundColor(result.attackTeamWon ? .yellow : .cyan)
+
+            kittySection
+
+            HStack(spacing: metrics.teamLevelSpacing) {
+                teamLevel(name: "南北", team: 0)
+                teamLevel(name: "东西", team: 1)
+            }
+
+            HStack(spacing: 20) {
+                Button(action: onQuit) {
+                    Text("退出")
+                        .font(.headline)
+                        .foregroundColor(.white.opacity(0.8))
+                        .padding(.horizontal, 28)
+                        .padding(.vertical, 12)
+                        .background(Color.white.opacity(0.15))
+                        .clipShape(Capsule())
+                }
+
+                Button(action: onNext) {
+                    Text("下一局 →")
+                        .font(.headline.bold())
+                        .foregroundColor(canStartNext ? .white : .white.opacity(0.45))
+                        .padding(.horizontal, 28)
+                        .padding(.vertical, 12)
+                        .background(canStartNext ? Color.blue : Color.gray.opacity(0.45))
+                        .clipShape(Capsule())
+                }
+                .disabled(!canStartNext)
+            }
+        }
+    }
 
     @ViewBuilder
     private var kittySection: some View {
@@ -154,5 +169,41 @@ struct RoundResultView: View {
                 .background(Color.white.opacity(0.15))
                 .clipShape(Circle())
         }
+    }
+}
+
+private struct RoundResultMetrics {
+    let size: CGSize
+
+    private var isTabletCanvas: Bool {
+        size.width >= 900 && size.height >= 600
+    }
+
+    var panelWidth: CGFloat {
+        min(size.width - outerHorizontalPadding * 2, isTabletCanvas ? 640 : 560)
+    }
+
+    var panelMaxHeight: CGFloat {
+        size.height - 40
+    }
+
+    var outerHorizontalPadding: CGFloat {
+        isTabletCanvas ? 40 : 24
+    }
+
+    var contentPadding: CGFloat {
+        isTabletCanvas ? 32 : 28
+    }
+
+    var contentSpacing: CGFloat {
+        isTabletCanvas ? 26 : 24
+    }
+
+    var teamLevelSpacing: CGFloat {
+        isTabletCanvas ? 40 : 32
+    }
+
+    var titleFont: Font {
+        isTabletCanvas ? .largeTitle.bold() : .title.bold()
     }
 }

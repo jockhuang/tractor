@@ -7,6 +7,7 @@ struct CardView: View {
     var isSelected: Bool = false
     var isFaceDown: Bool = false
     var isSmall: Bool = false
+    var sizeScale: CGFloat = 1
 
     private var isRed: Bool {
         card.suit == .hearts || card.suit == .diamonds
@@ -42,6 +43,8 @@ struct CardView: View {
                 regularCardContent
             }
         }
+        .frame(width: baseCardWidth, height: baseCardHeight)
+        .scaleEffect(sizeScale)
         .frame(width: cardWidth, height: cardHeight)
         .scaleEffect(isSelected ? 1.05 : 1.0)
         .animation(.spring(response: 0.2, dampingFraction: 0.7), value: isSelected)
@@ -71,6 +74,8 @@ struct CardView: View {
                 .font(.system(size: isSmall ? 12 : 20))
                 .foregroundColor(.white.opacity(0.25))
         }
+        .frame(width: baseCardWidth, height: baseCardHeight)
+        .scaleEffect(sizeScale)
         .frame(width: cardWidth, height: cardHeight)
     }
 
@@ -163,8 +168,10 @@ struct CardView: View {
         .lineLimit(1)
     }
 
-    private var cardWidth: CGFloat  { isSmall ? 40 : 64 }
-    private var cardHeight: CGFloat { isSmall ? 58 : 90 }
+    private var baseCardWidth: CGFloat  { isSmall ? 40 : 64 }
+    private var baseCardHeight: CGFloat { isSmall ? 58 : 90 }
+    private var cardWidth: CGFloat  { baseCardWidth * sizeScale }
+    private var cardHeight: CGFloat { baseCardHeight * sizeScale }
     private var isDarkMode: Bool { colorScheme == .dark }
     private var cardShadowYOffset: CGFloat { isSmall ? 1 : 2 }
     private var cardShadowColor: Color {

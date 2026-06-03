@@ -14,6 +14,10 @@ class GameEngine: ObservableObject {
     private var stateCancellable: AnyCancellable?
     private var phaseCancellable: AnyCancellable?
     private var dealingTask: Task<Void, Never>?
+    private var aiTurnTask: Task<Void, Never>?
+    private var trickResolutionTask: Task<Void, Never>?
+    private var aiTurnGeneration = 0
+    private var trickResolutionGeneration = 0
     let multiplayer = LANMultiplayerManager()
     @Published var localPosition: PlayerPosition = .south
     private var humanControlledPositions: Set<PlayerPosition> = [.south]
@@ -35,6 +39,7 @@ class GameEngine: ObservableObject {
 
     func startNewGame() {
         dealingTask?.cancel()
+        cancelScheduledTurnWork()
         multiplayer.leave()
         localPosition = .south
         humanControlledPositions = [.south]
@@ -46,6 +51,7 @@ class GameEngine: ObservableObject {
 
     func returnToMenuFromMultiplayer() {
         dealingTask?.cancel()
+        cancelScheduledTurnWork()
         localPosition = .south
         humanControlledPositions = [.south]
         state.selectedCards = []
@@ -59,6 +65,7 @@ class GameEngine: ObservableObject {
         playerNames: [PlayerPosition: String] = [:]
     ) {
         dealingTask?.cancel()
+        cancelScheduledTurnWork()
         self.localPosition = localPosition
         self.humanControlledPositions = humanPositions
         state = GameState()
@@ -74,6 +81,7 @@ class GameEngine: ObservableObject {
 
     func startNewRound() {
         dealingTask?.cancel()
+        cancelScheduledTurnWork()
         state.resetRound()
         state.phase     = .dealing
         state.trumpRank = state.currentDealerTeamLevel
@@ -575,10 +583,7 @@ class GameEngine: ObservableObject {
         syncMultiplayerState()
 
         if !humanControlledPositions.contains(state.dealerPosition) {
-            Task {
-                try? await Task.sleep(nanoseconds: 600_000_000)
-                aiTakeTurn(position: state.dealerPosition)
-            }
+            scheduleAITurn(position: state.dealerPosition, delay: 0.6)
         }
     }
 
@@ -652,8 +657,21 @@ class GameEngine: ObservableObject {
     }
 
     private func performPlay(position: PlayerPosition, cards: [Card]) {
+        guard state.phase == .playing,
+              !state.isResolvingTrick,
+              state.currentTurn == position,
+              !cards.isEmpty else { return }
+
+        let leadCount = state.currentTrick.leadCards?.count ?? cards.count
+        guard cards.count == leadCount else { return }
+
+        let player = state.player(position)
+        guard cards.allSatisfy({ card in
+            player.hand.contains(where: { $0.id == card.id })
+        }) else { return }
+
         SoundManager.shared.playCardSlap()
-        state.player(position).play(cards: cards)
+        player.play(cards: cards)
         state.currentTrick.plays.append((position: position, cards: cards))
         state.selectedCards = []
         state.message = "\(displayName(for: position)) 出了 \(cards.map { $0.shortDisplay }.joined(separator: " "))"
@@ -687,15 +705,11 @@ class GameEngine: ObservableObject {
         if state.currentTrick.isComplete {
             beginTrickResolution()
         } else {
-            syncMultiplayerState()
             let next = nextPosition(after: position)
             state.currentTurn = next
             syncMultiplayerState()
             if !humanControlledPositions.contains(next) {
-                Task {
-                    try? await Task.sleep(nanoseconds: UInt64(aiDelay * 1_000_000_000))
-                    aiTakeTurn(position: next)
-                }
+                scheduleAITurn(position: next, delay: aiDelay)
             }
         }
     }
@@ -706,15 +720,13 @@ class GameEngine: ObservableObject {
         guard state.currentTrick.isComplete,
               !state.isResolvingTrick else { return }
 
+        cancelAITurnTask()
         state.isResolvingTrick = true
         state.phase = .trickEnd
         state.selectedCards = []
         syncMultiplayerState()
 
-        Task {
-            try? await Task.sleep(nanoseconds: UInt64(trickEndDelay * 1_000_000_000))
-            resolveTrick()
-        }
+        scheduleTrickResolution(delay: trickEndDelay)
     }
 
     private func resolveTrick() {
@@ -747,10 +759,7 @@ class GameEngine: ObservableObject {
         syncMultiplayerState()
 
         if !humanControlledPositions.contains(winner) {
-            Task {
-                try? await Task.sleep(nanoseconds: UInt64(aiDelay * 1_000_000_000))
-                aiTakeTurn(position: winner)
-            }
+            scheduleAITurn(position: winner, delay: aiDelay)
         }
     }
 
@@ -883,6 +892,108 @@ class GameEngine: ObservableObject {
             forcedCards: forcedCards
         )
         performPlay(position: position, cards: cards)
+    }
+
+    private func scheduleAITurn(position: PlayerPosition, delay: TimeInterval) {
+        guard state.phase == .playing,
+              !state.isResolvingTrick,
+              state.currentTurn == position,
+              !humanControlledPositions.contains(position) else { return }
+
+        cancelAITurnTask()
+        aiTurnGeneration += 1
+        let generation = aiTurnGeneration
+        let leadPosition = state.currentTrick.leadPosition
+        let playCount = state.currentTrick.plays.count
+        let completedCount = state.completedTricks.count
+        let nanoseconds = UInt64(delay * 1_000_000_000)
+
+        aiTurnTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: nanoseconds)
+            } catch {
+                return
+            }
+            self?.runScheduledAITurn(
+                position: position,
+                generation: generation,
+                leadPosition: leadPosition,
+                playCount: playCount,
+                completedCount: completedCount
+            )
+        }
+    }
+
+    private func runScheduledAITurn(
+        position: PlayerPosition,
+        generation: Int,
+        leadPosition: PlayerPosition,
+        playCount: Int,
+        completedCount: Int
+    ) {
+        guard generation == aiTurnGeneration,
+              state.phase == .playing,
+              !state.isResolvingTrick,
+              state.currentTurn == position,
+              state.currentTrick.leadPosition == leadPosition,
+              state.currentTrick.plays.count == playCount,
+              state.completedTricks.count == completedCount else { return }
+
+        aiTakeTurn(position: position)
+    }
+
+    private func scheduleTrickResolution(delay: TimeInterval) {
+        cancelTrickResolutionTask()
+        trickResolutionGeneration += 1
+        let generation = trickResolutionGeneration
+        let leadPosition = state.currentTrick.leadPosition
+        let completedCount = state.completedTricks.count
+        let nanoseconds = UInt64(delay * 1_000_000_000)
+
+        trickResolutionTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: nanoseconds)
+            } catch {
+                return
+            }
+            self?.runScheduledTrickResolution(
+                generation: generation,
+                leadPosition: leadPosition,
+                completedCount: completedCount
+            )
+        }
+    }
+
+    private func runScheduledTrickResolution(
+        generation: Int,
+        leadPosition: PlayerPosition,
+        completedCount: Int
+    ) {
+        guard generation == trickResolutionGeneration,
+              state.phase == .trickEnd,
+              state.isResolvingTrick,
+              state.currentTrick.isComplete,
+              state.currentTrick.leadPosition == leadPosition,
+              state.completedTricks.count == completedCount else { return }
+
+        resolveTrick()
+    }
+
+    private func cancelScheduledTurnWork() {
+        cancelAITurnTask()
+        cancelTrickResolutionTask()
+    }
+
+    private func cancelAITurnTask() {
+        aiTurnTask?.cancel()
+        aiTurnTask = nil
+        aiTurnGeneration += 1
+    }
+
+    private func cancelTrickResolutionTask() {
+        trickResolutionTask?.cancel()
+        trickResolutionTask = nil
+        trickResolutionGeneration += 1
     }
 
     // MARK: - 甩牌分析
@@ -1061,6 +1172,7 @@ class GameEngine: ObservableObject {
 
     func apply(snapshot: GameSnapshot) {
         dealingTask?.cancel()
+        cancelScheduledTurnWork()
         localPosition = snapshot.localPosition
         humanControlledPositions = [snapshot.localPosition]
 
