@@ -1137,6 +1137,14 @@ class GameEngine: ObservableObject {
                 NetworkPlaySnapshot(position: $0.position, cards: $0.cards)
             }
         )
+        let completedTricks = state.completedTricks.map { completedTrick in
+            NetworkTrickSnapshot(
+                leadPosition: completedTrick.leadPosition,
+                plays: completedTrick.plays.map {
+                    NetworkPlaySnapshot(position: $0.position, cards: $0.cards)
+                }
+            )
+        }
 
         let players = state.players.map { player in
             NetworkPlayerSnapshot(
@@ -1159,6 +1167,7 @@ class GameEngine: ObservableObject {
             isResolvingTrick: state.isResolvingTrick,
             dealerPosition: state.dealerPosition,
             currentTrick: trick,
+            completedTricks: completedTricks,
             currentLeader: state.currentLeader,
             currentTurn: state.currentTurn,
             attackScore: state.attackScore,
@@ -1206,6 +1215,11 @@ class GameEngine: ObservableObject {
         var trick = Trick(leadPosition: snapshot.currentTrick.leadPosition)
         trick.plays = snapshot.currentTrick.plays.map { ($0.position, $0.cards) }
         state.currentTrick = trick
+        state.completedTricks = snapshot.completedTricks.map { trickSnapshot in
+            var completedTrick = Trick(leadPosition: trickSnapshot.leadPosition)
+            completedTrick.plays = trickSnapshot.plays.map { ($0.position, $0.cards) }
+            return completedTrick
+        }
     }
 
     private func placeholderCards(count: Int) -> [Card] {

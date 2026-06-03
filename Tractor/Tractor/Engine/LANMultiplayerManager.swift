@@ -48,6 +48,7 @@ struct GameSnapshot: Codable {
     let isResolvingTrick: Bool
     let dealerPosition: PlayerPosition
     let currentTrick: NetworkTrickSnapshot
+    let completedTricks: [NetworkTrickSnapshot]
     let currentLeader: PlayerPosition
     let currentTurn: PlayerPosition
     let attackScore: Int
