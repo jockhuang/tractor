@@ -210,20 +210,23 @@ class GameEngine: ObservableObject {
     /// AI 庄家在无人亮主时必须亮主
     private func forceAIDeclare(dealer: PlayerPosition) {
         let hand = state.player(dealer).hand
-        let tr   = state.trumpRank
-
-        // 找张数最多的级牌花色
-        var counts: [Suit: Int] = [:]
-        for card in hand where card.rank == tr {
-            if let s = card.suit { counts[s, default: 0] += 1 }
+        let suitCandidates = Suit.allCases.map { suit in
+            aiDeclarationCandidate(for: suit, hand: hand, position: dealer, forced: true)
         }
-        if let best = counts.max(by: { $0.value < $1.value }) {
-            let str = best.value >= 2 ? 2 : 1
-            applyDeclaration(position: dealer, suit: best.key, strength: str)
+        let bestSuit = suitCandidates.max { lhs, rhs in
+            if lhs.score != rhs.score { return lhs.score < rhs.score }
+            return lhs.strength < rhs.strength
+        }
+        let noTrump = noTrumpDeclarationCandidate(hand: hand, position: dealer, forced: true)
+
+        if let noTrump,
+           let bestSuit,
+           noTrump.score > bestSuit.score {
+            applyDeclaration(position: dealer, suit: nil, strength: 3)
+        } else if let bestSuit {
+            applyDeclaration(position: dealer, suit: bestSuit.suit, strength: bestSuit.strength)
         } else {
-            // 没有级牌，随机选一门
-            let fallback = Suit.allCases.randomElement()!
-            applyDeclaration(position: dealer, suit: fallback, strength: 1)
+            applyDeclaration(position: dealer, suit: Suit.allCases.randomElement()!, strength: 1)
         }
     }
 
@@ -354,83 +357,277 @@ class GameEngine: ObservableObject {
 
     private func aiConsiderDeclaration(position: PlayerPosition) {
         let hand    = state.player(position).hand
-        let tr      = state.trumpRank
         let cur     = state.declarationStrength
-        let dealt   = state.dealtCount   // 0-100
 
-        // ── 统计每花色级牌数量（非王）──────────────────
-        var counts: [Suit: Int] = [:]
-        for card in hand where card.rank == tr {
-            if let s = card.suit { counts[s, default: 0] += 1 }
-        }
+        guard cur < 3 else { return }
 
-        // ── 王牌对反无主（小王或大王，覆盖 strength==2）──
-        if cur == 2 {
-            let bigCount   = hand.filter { $0.rank == .bigJoker }.count
-            let smallCount = hand.filter { $0.rank == .smallJoker }.count
-            if bigCount >= 2 || smallCount >= 2 {
-                // 对王反无主限制：需要手中 ≥3 张 A 且 ≥3 对子（含连对），手牌强度足够才值得打无主
-                let aceCount = hand.filter { $0.rank == .ace }.count
-                var pairGroupMap: [String: Int] = [:]
-                for card in hand {
-                    let key = CardComparator.pairKey(card, trumpSuit: state.trumpSuit, trumpRank: tr)
-                    pairGroupMap[key, default: 0] += 1
-                }
-                let pairCount = pairGroupMap.values.filter { $0 >= 2 }.count
-                guard aceCount >= 3 && pairCount >= 3 else { return }
-                applyDeclaration(position: position, suit: nil, strength: 3)
-                return
-            }
-        }
-
-        // ── 按发牌进度确定亮主门槛 ──────────────────────
-        // dealt < 33  : 不亮（太早）
-        // 33 ≤ dealt < 50  : 某花色 ≥ 5 张才亮
-        // 50 ≤ dealt < 75  : 某花色 ≥ 8 张，或手中有某花色 < 3 张
-        // dealt ≥ 75       : 某花色 ≥ 平均值（总张数 / 有牌花色数）
-        guard dealt >= 33 else { return }
-
-        func meetsThreshold(_ count: Int) -> Bool {
-            if dealt < 50 {
-                return count >= 5
-            } else if dealt < 75 {
-                if count >= 8 { return true }
-                // 手中某花色少于3张时降低门槛（弱花色，尽早亮主保护）
-                let minSuitCount = counts.values.min() ?? 0
-                return minSuitCount < 3
-            } else {
-                // 后半程：达到平均水平即可亮
-                let uniqueSuits = max(counts.count, 1)
-                let avg = hand.filter { $0.rank == tr && !$0.isJoker }.count / uniqueSuits
-                return count >= max(avg, 1)
-            }
-        }
-
-        // ── 优先宣告对子 ──────────────────────────────
-        if let best = counts.filter({ $0.value >= 2 && meetsThreshold($0.value) })
-                            .max(by: { $0.value < $1.value }) {
-            if cur < 2 {
-                // 反不同花色限制（已有亮主时）：新花色级牌数须严格大于当前声明数；
-                // 数量相同时须有更多对子；都相同则不反
-                if cur > 0, state.trumpDeclaration?.suit != best.key {
-                    let newCount  = best.value
-                    let newPairs  = newCount / 2
-                    let curPairs  = cur == 2 ? 1 : 0   // cur==1→单张0对; cur==2→1对
-                    guard newCount > cur || (newCount == cur && newPairs > curPairs) else {
-                        return
-                    }
-                }
-                applyDeclaration(position: position, suit: best.key, strength: 2)
-            }
+        if let noTrump = noTrumpDeclarationCandidate(hand: hand, position: position, forced: false),
+           shouldApplyAIDeclaration(noTrump, position: position) {
+            applyDeclaration(position: position, suit: nil, strength: 3)
             return
         }
 
-        // ── 单张亮主（原规则：仅须满足发牌进度门槛，无额外手牌限制）────
-        if cur == 0,
-           let best = counts.filter({ meetsThreshold($0.value) })
-                            .max(by: { $0.value < $1.value }) {
-            applyDeclaration(position: position, suit: best.key, strength: 1)
+        let candidates = Suit.allCases
+            .map { aiDeclarationCandidate(for: $0, hand: hand, position: position, forced: false) }
+            .filter { $0.strength > cur }
+            .filter { shouldApplyAIDeclaration($0, position: position) }
+
+        if let best = candidates.max(by: { $0.score < $1.score }) {
+            applyDeclaration(position: position, suit: best.suit, strength: best.strength)
         }
+    }
+
+    private struct AIDeclarationCandidate {
+        let suit: Suit?
+        let strength: Int
+        let score: Int
+    }
+
+    private func aiDeclarationCandidate(
+        for suit: Suit,
+        hand: [Card],
+        position: PlayerPosition,
+        forced: Bool
+    ) -> AIDeclarationCandidate {
+        let levelCount = levelCardCount(in: hand, suit: suit)
+        let strength = levelCount >= 2 ? 2 : 1
+        let score = scoreTrumpSuit(suit, hand: hand, position: position)
+
+        if forced {
+            return AIDeclarationCandidate(suit: suit, strength: strength, score: score)
+        }
+
+        if strength == 2 {
+            let minimumScore = state.declarationStrength == 0 ? 58 : 70
+            guard dealProgress >= 0.30, score >= minimumScore else {
+                return AIDeclarationCandidate(suit: suit, strength: 0, score: score)
+            }
+            return AIDeclarationCandidate(suit: suit, strength: 2, score: score)
+        }
+
+        guard canSingleDeclare(suit, hand: hand, position: position),
+              score >= 45 else {
+            return AIDeclarationCandidate(suit: suit, strength: 0, score: score)
+        }
+        return AIDeclarationCandidate(suit: suit, strength: 1, score: score)
+    }
+
+    private func noTrumpDeclarationCandidate(
+        hand: [Card],
+        position: PlayerPosition,
+        forced: Bool
+    ) -> AIDeclarationCandidate? {
+        guard hasJokerPair(in: hand) else { return nil }
+
+        let noTrumpScore = scoreNoTrump(hand: hand, position: position)
+        let bestSuitScore = Suit.allCases
+            .map { scoreTrumpSuit($0, hand: hand, position: position) }
+            .max() ?? 0
+
+        if forced {
+            guard noTrumpScore > bestSuitScore + 20,
+                  noTrumpShapeIsPlayable(hand: hand) else { return nil }
+            return AIDeclarationCandidate(suit: nil, strength: 3, score: noTrumpScore)
+        }
+
+        guard dealProgress >= 0.35,
+              noTrumpScore >= 105,
+              noTrumpScore > bestSuitScore + 20,
+              noTrumpShapeIsPlayable(hand: hand) else { return nil }
+        return AIDeclarationCandidate(suit: nil, strength: 3, score: noTrumpScore)
+    }
+
+    private func shouldApplyAIDeclaration(
+        _ candidate: AIDeclarationCandidate,
+        position: PlayerPosition
+    ) -> Bool {
+        let cur = state.declarationStrength
+        guard candidate.strength > cur else { return false }
+        guard let current = state.trumpDeclaration else { return true }
+
+        let currentScore: Int
+        if let currentSuit = current.suit {
+            currentScore = scoreTrumpSuit(currentSuit, hand: state.player(position).hand, position: position)
+        } else {
+            currentScore = scoreNoTrump(hand: state.player(position).hand, position: position)
+        }
+
+        if candidate.suit == current.suit {
+            return candidate.score >= currentScore
+        }
+
+        let margin = position.team == state.dealerPosition.team ? 10 : 25
+        return candidate.score > currentScore + margin
+    }
+
+    private var dealProgress: Double {
+        min(1.0, max(0.0, Double(state.dealtCount) / 100.0))
+    }
+
+    private func canSingleDeclare(_ suit: Suit, hand: [Card], position: PlayerPosition) -> Bool {
+        guard dealProgress >= 0.35,
+              levelCardCount(in: hand, suit: suit) >= 1 else { return false }
+
+        return suitLength(in: hand, suit: suit) >= 5
+            || highCardCount(in: hand, suit: suit) >= 2
+            || position.team == state.dealerPosition.team
+            || dealProgress >= 0.75
+    }
+
+    private func scoreTrumpSuit(_ suit: Suit, hand: [Card], position: PlayerPosition) -> Int {
+        let levelCards = levelCardCount(in: hand, suit: suit)
+        let levelPairs = levelCards / 2
+        let length = suitLength(in: hand, suit: suit)
+        let highCards = highCardCount(in: hand, suit: suit)
+        let pairTotal = pairCount(in: hand, trumpSuit: suit)
+        let tractorTotal = tractorCount(in: hand, trumpSuit: suit)
+
+        var score = 0
+        score += levelCards * 20
+        score += levelPairs * 35
+        score += hand.filter { $0.rank == .ace }.count * 8
+        score += pairTotal * 10
+        score += tractorTotal * 15
+        score += Int(dealProgress * 10.0)
+        score += length * 4
+        score += highCards * 6
+        if position.team == state.dealerPosition.team { score += 10 }
+        score -= sideDispersionPenalty(forTrumpSuit: suit, hand: hand)
+        score -= overDeclareRiskPenalty(for: suit, position: position)
+        if levelCards == 2 && length <= 2 { score -= 10 }
+        return score
+    }
+
+    private func scoreNoTrump(hand: [Card], position: PlayerPosition) -> Int {
+        let levelCards = hand.filter { $0.rank == state.trumpRank && !$0.isJoker }.count
+        let levelPairs = levelCards / 2
+        let jokerCount = hand.filter { $0.isJoker }.count
+        let pairTotal = pairCount(in: hand, trumpSuit: nil)
+        let tractorTotal = tractorCount(in: hand, trumpSuit: nil)
+
+        var score = 0
+        score += levelCards * 20
+        score += levelPairs * 35
+        score += hand.filter { $0.rank == .ace }.count * 10
+        score += pairTotal * 10
+        score += tractorTotal * 15
+        score += Int(dealProgress * 10.0)
+        score += jokerCount * 18
+        if hasJokerPair(in: hand) { score += 35 }
+        if position.team == state.dealerPosition.team { score += 6 }
+        score -= noTrumpWeakSuitPenalty(hand: hand)
+        score -= overDeclareRiskPenalty(for: nil, position: position)
+        return score
+    }
+
+    private func levelCardCount(in hand: [Card], suit: Suit) -> Int {
+        hand.filter { $0.rank == state.trumpRank && $0.suit == suit }.count
+    }
+
+    private func suitLength(in hand: [Card], suit: Suit) -> Int {
+        hand.filter { $0.suit == suit }.count
+    }
+
+    private func highCardCount(in hand: [Card], suit: Suit) -> Int {
+        hand.filter {
+            $0.suit == suit && ($0.rank == .ace || $0.rank == .king || $0.rank == .ten)
+        }.count
+    }
+
+    private func hasJokerPair(in hand: [Card]) -> Bool {
+        hand.filter { $0.rank == .bigJoker }.count >= 2
+            || hand.filter { $0.rank == .smallJoker }.count >= 2
+    }
+
+    private func noTrumpShapeIsPlayable(hand: [Card]) -> Bool {
+        let aceCount = hand.filter { $0.rank == .ace }.count
+        let pairs = pairCount(in: hand, trumpSuit: nil)
+        let weakestSuit = Suit.allCases
+            .map { suitLength(in: hand, suit: $0) }
+            .min() ?? 0
+
+        return aceCount >= 2
+            && pairs >= 2
+            && weakestSuit >= 2
+    }
+
+    private func pairCount(in hand: [Card], trumpSuit: Suit?) -> Int {
+        var groups: [String: Int] = [:]
+        for card in hand {
+            let key = CardComparator.pairKey(card, trumpSuit: trumpSuit, trumpRank: state.trumpRank)
+            groups[key, default: 0] += 1
+        }
+        return groups.values.reduce(0) { $0 + $1 / 2 }
+    }
+
+    private func tractorCount(in hand: [Card], trumpSuit: Suit?) -> Int {
+        var groups: [String: [Card]] = [:]
+        for card in hand {
+            let key = CardComparator.pairKey(card, trumpSuit: trumpSuit, trumpRank: state.trumpRank)
+            groups[key, default: []].append(card)
+        }
+
+        let pairRepresentatives = groups.values.compactMap { cards -> Card? in
+            cards.count >= 2 ? cards[0] : nil
+        }
+        let bySuit = Dictionary(grouping: pairRepresentatives) {
+            CardComparator.logicalSuit($0, trumpSuit: trumpSuit, trumpRank: state.trumpRank)
+        }
+
+        var total = 0
+        for pairs in bySuit.values {
+            let sorted = pairs.sorted {
+                CardComparator.pairOrderValue($0, trumpSuit: trumpSuit, trumpRank: state.trumpRank)
+                    < CardComparator.pairOrderValue($1, trumpSuit: trumpSuit, trumpRank: state.trumpRank)
+            }
+
+            var runLength = 1
+            for idx in sorted.indices.dropFirst() {
+                let previous = sorted[sorted.index(before: idx)]
+                let current = sorted[idx]
+                if CardComparator.areAdjacentPairRanks(previous, current, trumpSuit: trumpSuit, trumpRank: state.trumpRank) {
+                    runLength += 1
+                } else {
+                    if runLength >= 2 { total += 1 }
+                    runLength = 1
+                }
+            }
+            if runLength >= 2 { total += 1 }
+        }
+        return total
+    }
+
+    private func sideDispersionPenalty(forTrumpSuit trumpSuit: Suit, hand: [Card]) -> Int {
+        let sideLengths = Suit.allCases
+            .filter { $0 != trumpSuit }
+            .map { suit in
+                hand.filter { $0.suit == suit && $0.rank != state.trumpRank }.count
+            }
+        let activeSideSuits = sideLengths.filter { $0 > 0 }.count
+        let sideCards = sideLengths.reduce(0, +)
+        let maxSide = sideLengths.max() ?? 0
+        let minActiveSide = sideLengths.filter { $0 > 0 }.min() ?? 0
+        let flatSidePenalty = activeSideSuits == 3 && maxSide - minActiveSide <= 2 ? 8 : 0
+        return max(0, activeSideSuits - 2) * 4
+            + max(0, sideCards - maxSide - 4) * 2
+            + flatSidePenalty
+    }
+
+    private func noTrumpWeakSuitPenalty(hand: [Card]) -> Int {
+        let lengths = Suit.allCases.map { suitLength(in: hand, suit: $0) }
+        let weakest = lengths.min() ?? 0
+        let veryShortSuits = lengths.filter { $0 < 2 }.count
+        return max(0, 2 - weakest) * 30 + veryShortSuits * 12
+    }
+
+    private func overDeclareRiskPenalty(for suit: Suit?, position: PlayerPosition) -> Int {
+        guard let current = state.trumpDeclaration else { return 0 }
+        if current.suit == suit { return 0 }
+
+        var penalty = current.strength * 4
+        if current.declarer.team == position.team { penalty += 18 }
+        if position.team != state.dealerPosition.team { penalty += 6 }
+        return penalty
     }
 
     /// 应用亮主声明
@@ -660,7 +857,9 @@ class GameEngine: ObservableObject {
         guard state.phase == .playing,
               !state.isResolvingTrick,
               state.currentTurn == position,
-              !cards.isEmpty else { return }
+              !cards.isEmpty,
+              state.currentTrick.plays.count < 4,
+              !state.currentTrick.plays.contains(where: { $0.position == position }) else { return }
 
         let leadCount = state.currentTrick.leadCards?.count ?? cards.count
         guard cards.count == leadCount else { return }
@@ -669,6 +868,15 @@ class GameEngine: ObservableObject {
         guard cards.allSatisfy({ card in
             player.hand.contains(where: { $0.id == card.id })
         }) else { return }
+
+        if let leadCards = state.currentTrick.leadCards {
+            let evaluator = makeEvaluator()
+            guard evaluator.isValidPlay(selected: cards, hand: player.hand, leadCards: leadCards) else {
+                state.message = "\(displayName(for: position)) 出牌不合法，已取消"
+                syncMultiplayerState()
+                return
+            }
+        }
 
         SoundManager.shared.playCardSlap()
         player.play(cards: cards)
@@ -718,6 +926,7 @@ class GameEngine: ObservableObject {
 
     private func beginTrickResolution() {
         guard state.currentTrick.isComplete,
+              Set(state.currentTrick.plays.map(\.position)).count == 4,
               !state.isResolvingTrick else { return }
 
         cancelAITurnTask()
@@ -731,7 +940,8 @@ class GameEngine: ObservableObject {
 
     private func resolveTrick() {
         guard state.isResolvingTrick,
-              state.currentTrick.isComplete else { return }
+              state.currentTrick.isComplete,
+              Set(state.currentTrick.plays.map(\.position)).count == 4 else { return }
 
         let evaluator = makeEvaluator()
         let winner    = evaluator.winner(of: state.currentTrick)
@@ -882,7 +1092,8 @@ class GameEngine: ObservableObject {
     private func aiTakeTurn(position: PlayerPosition) {
         guard state.phase == .playing,
               !state.isResolvingTrick,
-              state.currentTurn == position else { return }
+              state.currentTurn == position,
+              !state.currentTrick.plays.contains(where: { $0.position == position }) else { return }
 
         let forcedCards = state.forcedFollowCards[position] ?? []
         let cards = AIPlayer.chooseCards(
@@ -903,9 +1114,11 @@ class GameEngine: ObservableObject {
         cancelAITurnTask()
         aiTurnGeneration += 1
         let generation = aiTurnGeneration
+        let roundNumber = state.roundNumber
         let leadPosition = state.currentTrick.leadPosition
         let playCount = state.currentTrick.plays.count
         let completedCount = state.completedTricks.count
+        let handCount = state.player(position).hand.count
         let nanoseconds = UInt64(delay * 1_000_000_000)
 
         aiTurnTask = Task { [weak self] in
@@ -917,9 +1130,11 @@ class GameEngine: ObservableObject {
             self?.runScheduledAITurn(
                 position: position,
                 generation: generation,
+                roundNumber: roundNumber,
                 leadPosition: leadPosition,
                 playCount: playCount,
-                completedCount: completedCount
+                completedCount: completedCount,
+                handCount: handCount
             )
         }
     }
@@ -927,17 +1142,22 @@ class GameEngine: ObservableObject {
     private func runScheduledAITurn(
         position: PlayerPosition,
         generation: Int,
+        roundNumber: Int,
         leadPosition: PlayerPosition,
         playCount: Int,
-        completedCount: Int
+        completedCount: Int,
+        handCount: Int
     ) {
         guard generation == aiTurnGeneration,
               state.phase == .playing,
               !state.isResolvingTrick,
+              state.roundNumber == roundNumber,
               state.currentTurn == position,
               state.currentTrick.leadPosition == leadPosition,
               state.currentTrick.plays.count == playCount,
-              state.completedTricks.count == completedCount else { return }
+              state.completedTricks.count == completedCount,
+              state.player(position).hand.count == handCount,
+              !state.currentTrick.plays.contains(where: { $0.position == position }) else { return }
 
         aiTakeTurn(position: position)
     }
