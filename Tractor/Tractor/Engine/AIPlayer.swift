@@ -1635,9 +1635,17 @@ struct AIPlayer {
 
         // 3. Structure Integrity ── 拆散更大结构的代价（AKK 当一组，AAKK 当一拖拉机）；
         //    甩牌已验证为更高价值牌型，豁免结构拆罚。整出强结构则给正向控制价值。
-        let fragmentation = isSlam ? 0 : structureFragmentationCost(cards, hand: hand, ts: ts, tr: tr)
+        let fragmentation = isSlam
+            ? mixedSlamFragmentationCost(
+                cards: cards, hand: hand, position: position, ts: ts, tr: tr, ctx: ctx
+            ) * 0.35
+            : structureFragmentationCost(cards, hand: hand, ts: ts, tr: tr)
+                + mixedSlamFragmentationCost(cards: cards, hand: hand, position: position, ts: ts, tr: tr, ctx: ctx)
         score -= fragmentation * LeadWeight.structure
         score += wholeStructureControlValue(cards, hand: hand, ts: ts, tr: tr, ctx: ctx) * LeadWeight.structure
+        if isSlam {
+            score += mixedSlamControlValue(cards, hand: hand, ts: ts, tr: tr, ctx: ctx) * LeadWeight.structure
+        }
 
         // 4. Asset Decay ── 趁旁门 A / 旁门最大单张还能干净赢墩时及时兑现
         score += assetDecayRealization(cards, leadSuit: leadSuit, position: position,
@@ -1705,6 +1713,35 @@ struct AIPlayer {
         return cost
     }
 
+    /// 混合甩牌（如 AAK = 对子 + 单张）也是结构资产。
+    /// 若只打出安全混合甩牌的一部分（例如从 AAK 中先出 AA），这里统一按结构碎片化扣分。
+    private static func mixedSlamFragmentationCost(
+        cards: [Card],
+        hand: [Card],
+        position: PlayerPosition,
+        ts: Suit?,
+        tr: Rank,
+        ctx: AIContext
+    ) -> Double {
+        let selected = Set(cards.map(\.id))
+        var cost = 0.0
+        for slam in findSlamLeadCandidates(in: hand, ts: ts, tr: tr, myTeam: position.team, ctx: ctx) {
+            guard isMixedStructureSlam(slam, ts: ts, tr: tr) else { continue }
+            let slamIDs = Set(slam.map(\.id))
+            guard selected != slamIDs else { continue }
+            let overlap = selected.intersection(slamIDs).count
+            guard overlap > 0 && overlap < slam.count else { continue }
+
+            let structureValue = max(
+                mixedSlamControlValue(slam, hand: hand, ts: ts, tr: tr, ctx: ctx),
+                0.8
+            )
+            let fractionUsed = Double(overlap) / Double(slam.count)
+            cost = max(cost, structureValue * (0.55 + fractionUsed * 0.45))
+        }
+        return cost
+    }
+
     /// 对子资产分级（统一口径：强对/分对/普通对）。
     private static func pairAssetWeight(_ rep: Card, ts: Suit?, tr: Rank) -> Double {
         if rep.rank == .bigJoker || rep.rank == .smallJoker || rep.rank == tr || rep.rank == .ace { return 1.0 }
@@ -1732,6 +1769,39 @@ struct AIPlayer {
             return dominant ? value : value * 0.3
         }
         return 0
+    }
+
+    /// 完整混合甩牌的结构控制价值。AAK 这类“对子 + 最大单张”不应被当作普通 slam 小加分，
+    /// 而应和对子/连对一样作为完整结构参与 Structure Integrity。
+    private static func mixedSlamControlValue(_ cards: [Card], hand: [Card], ts: Suit?, tr: Rank, ctx: AIContext) -> Double {
+        guard isMixedStructureSlam(cards, ts: ts, tr: tr) else { return 0 }
+
+        let pairedIDs = pairedCardIDs(in: cards, trumpSuit: ts, trumpRank: tr)
+        let pairValue = pairs(in: cards, trumpSuit: ts, trumpRank: tr)
+            .compactMap { pairRepresentative(of: $0, trumpSuit: ts, trumpRank: tr) }
+            .reduce(0.0) { $0 + pairAssetWeight($1, ts: ts, tr: tr) }
+        let tractorValue = tractorInfo(of: cards, trumpSuit: ts, trumpRank: tr)
+            .map { Double($0.pairCount) * 0.8 } ?? 0
+        let topSingleValue = cards
+            .filter { !pairedIDs.contains($0.id) }
+            .reduce(0.0) { partial, card in
+                if CardComparator.isTrump(card, trumpSuit: ts, trumpRank: tr) {
+                    return partial + (isBigTrump(card, ts: ts, tr: tr) ? 0.45 : 0.2)
+                }
+                return partial + ((card.rank == .ace || ctx.isEffectivelyBiggest(card, ts: ts, tr: tr)) ? 0.35 : 0.1)
+            }
+
+        let noTrumpBoost = ts == nil ? 0.25 : 0
+        return min(2.2, 0.35 + pairValue + tractorValue + topSingleValue + noTrumpBoost)
+    }
+
+    private static func isMixedStructureSlam(_ cards: [Card], ts: Suit?, tr: Rank) -> Bool {
+        guard cards.count >= 3,
+              tractorInfo(of: cards, trumpSuit: ts, trumpRank: tr) == nil,
+              !isPairMove(cards, ts: ts, tr: tr) else { return false }
+        let pairSlots = pairs(in: cards, trumpSuit: ts, trumpRank: tr).count
+        guard pairSlots > 0 else { return false }
+        return pairSlots * 2 < cards.count
     }
 
     /// 该结构（对子/连对/单张）当前是否「绝对赢」：
