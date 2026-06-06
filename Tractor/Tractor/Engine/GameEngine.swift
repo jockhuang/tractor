@@ -273,7 +273,7 @@ class GameEngine: ObservableObject {
                 syncMultiplayerState()
                 return
             }
-            applyDeclaration(position: position, suit: nil, strength: 3)
+            applyDeclaration(position: position, suit: nil, strength: 3, revealedCards: Array(selected.prefix(2)))
             state.selectedCards = []
             if state.dealtCount == 100 { proceedToKittyExchange() }
             syncMultiplayerState()
@@ -310,7 +310,7 @@ class GameEngine: ObservableObject {
             return
         }
 
-        applyDeclaration(position: position, suit: suit, strength: strength)
+        applyDeclaration(position: position, suit: suit, strength: strength, revealedCards: Array(selected.prefix(strength)))
         state.selectedCards = []
 
         // 发牌全部结束后才跳转
@@ -632,13 +632,30 @@ class GameEngine: ObservableObject {
 
     /// 应用亮主声明
     /// 亮主更新主花色，并将庄家设为亮主玩家（标准拖拉机规则：谁亮主谁坐庄）
-    private func applyDeclaration(position: PlayerPosition, suit: Suit?, strength: Int) {
+    private func applyDeclaration(
+        position: PlayerPosition,
+        suit: Suit?,
+        strength: Int,
+        revealedCards explicitRevealedCards: [Card]? = nil
+    ) {
+        let revealedCards = explicitRevealedCards ?? declarationCards(
+            position: position,
+            suit: suit,
+            strength: strength
+        )
         state.trumpSuit = suit          // nil = 无主
         state.trumpDeclaration = TrumpDeclaration(
             declarer: position,
             suit: suit,
             strength: strength
         )
+        state.declarationEvents.append(DeclarationEvent(
+            declarer: position,
+            suit: suit,
+            strength: strength,
+            revealedCards: revealedCards,
+            sequence: state.declarationEvents.count + 1
+        ))
         // roundNumber == 0（第 1 局发牌中）：亮主者成为庄家
         // roundNumber  > 0（第 2 局起）：庄家已定，亮主只更新主花色
         if state.roundNumber == 0 {
@@ -654,6 +671,24 @@ class GameEngine: ObservableObject {
         let suitStr = suit.map { $0.rawValue } ?? "无主"
         state.message = "\(displayName(for: position)) 亮主：\(suitStr)\(strength < 3 ? state.trumpRank.display : "") \(badge)"
         syncMultiplayerState()
+    }
+
+    private func declarationCards(position: PlayerPosition, suit: Suit?, strength: Int) -> [Card] {
+        let hand = state.player(position).hand
+        if strength == 3 {
+            for rank in [Rank.bigJoker, .smallJoker] {
+                let cards = hand.filter { $0.rank == rank }
+                if cards.count >= 2 { return Array(cards.prefix(2)) }
+            }
+            return []
+        }
+
+        guard let suit else { return [] }
+        return Array(
+            hand
+                .filter { $0.rank == state.trumpRank && $0.suit == suit && !$0.isJoker }
+                .prefix(strength)
+        )
     }
 
     private func setDealer(_ position: PlayerPosition) {
@@ -1382,6 +1417,7 @@ class GameEngine: ObservableObject {
             trumpSuit: state.trumpSuit,
             trumpRank: state.trumpRank,
             trumpDeclaration: state.trumpDeclaration,
+            declarationEvents: state.declarationEvents,
             dealtCount: state.dealtCount,
             isDealingFast: state.isDealingFast,
             isResolvingTrick: state.isResolvingTrick,
@@ -1410,6 +1446,7 @@ class GameEngine: ObservableObject {
         state.trumpSuit = snapshot.trumpSuit
         state.trumpRank = snapshot.trumpRank
         state.trumpDeclaration = snapshot.trumpDeclaration
+        state.declarationEvents = snapshot.declarationEvents
         state.dealtCount = snapshot.dealtCount
         state.isDealingFast = snapshot.isDealingFast
         state.isResolvingTrick = snapshot.isResolvingTrick

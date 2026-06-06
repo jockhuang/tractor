@@ -155,7 +155,7 @@ struct GameBoardView: View {
                     .clipShape(Capsule())
 
                     // 历史记录按钮
-                    if !state.completedTricks.isEmpty {
+                    if !state.completedTricks.isEmpty || !state.declarationEvents.isEmpty {
                         Button(action: { showHistory.toggle() }) {
                             HStack(spacing: 3) {
                                 Image(systemName: "clock.arrow.circlepath")
@@ -196,6 +196,7 @@ struct GameBoardView: View {
             if showHistory {
                 TrickHistoryPanel(
                     tricks: state.completedTricks,
+                    declarationEvents: state.declarationEvents,
                     trumpSuit: state.trumpSuit,
                     trumpRank: state.trumpRank,
                     playerNames: state.playerNames,

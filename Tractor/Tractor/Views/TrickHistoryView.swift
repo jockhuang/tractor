@@ -3,6 +3,7 @@ import SwiftUI
 /// 本局历史出牌记录面板
 struct TrickHistoryPanel: View {
     let tricks: [Trick]
+    let declarationEvents: [DeclarationEvent]
     let trumpSuit: Suit?
     let trumpRank: Rank
     let playerNames: [PlayerPosition: String]
@@ -13,60 +14,158 @@ struct TrickHistoryPanel: View {
     }
 
     var body: some View {
-        ZStack {
-            // 背景遮罩
-            Color.black.opacity(0.60)
-                .ignoresSafeArea()
-                .onTapGesture { onClose() }
+        GeometryReader { proxy in
+            ZStack {
+                // 背景遮罩
+                Color.black.opacity(0.60)
+                    .ignoresSafeArea()
+                    .onTapGesture { onClose() }
 
-            // 面板
-            VStack(spacing: 0) {
-                // 标题栏
-                HStack {
-                    Text("本局出牌记录")
-                        .font(.headline.bold())
-                        .foregroundColor(.white)
-                    Spacer()
-                    Text("共 \(tricks.count) 墩")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.5))
-                    Button(action: onClose) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.title3)
-                            .foregroundColor(.white.opacity(0.6))
+                // 面板
+                VStack(spacing: 0) {
+                    // 标题栏
+                    HStack {
+                        Text("本局记录")
+                            .font(.headline.bold())
+                            .foregroundColor(.white)
+                        Spacer()
+                        Text("\(declarationEvents.count) 次亮主 · \(tricks.count) 墩")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.5))
+                        Button(action: onClose) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title3)
+                                .foregroundColor(.white.opacity(0.6))
+                        }
+                        .padding(.leading, 8)
                     }
-                    .padding(.leading, 8)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .background(Color.white.opacity(0.08))
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 12)
+                    .background(Color.white.opacity(0.08))
 
-                Divider().background(Color.white.opacity(0.15))
+                    Divider().background(Color.white.opacity(0.15))
 
-                // 记录列表
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(Array(tricks.enumerated()), id: \.offset) { idx, trick in
-                            TrickHistoryRow(
-                                index: idx + 1,
-                                trick: trick,
-                                winner: evaluator.winner(of: trick),
-                                playerNames: playerNames
-                            )
-                            if idx < tricks.count - 1 {
-                                Divider().background(Color.white.opacity(0.08))
-                                    .padding(.horizontal, 12)
+                    // 记录列表
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            if !declarationEvents.isEmpty {
+                                sectionHeader("亮主 / 反主记录")
+                                ForEach(declarationEvents) { event in
+                                    DeclarationHistoryRow(event: event, playerNames: playerNames)
+                                    Divider().background(Color.white.opacity(0.08))
+                                        .padding(.horizontal, 12)
+                                }
+                            }
+
+                            if !tricks.isEmpty {
+                                sectionHeader("出牌记录")
+                                ForEach(Array(tricks.enumerated()), id: \.offset) { idx, trick in
+                                    TrickHistoryRow(
+                                        index: idx + 1,
+                                        trick: trick,
+                                        winner: evaluator.winner(of: trick),
+                                        playerNames: playerNames
+                                    )
+                                    if idx < tricks.count - 1 {
+                                        Divider().background(Color.white.opacity(0.08))
+                                            .padding(.horizontal, 12)
+                                    }
+                                }
                             }
                         }
+                        .padding(.vertical, 8)
                     }
-                    .padding(.vertical, 6)
+                }
+                .frame(width: proxy.size.width * 0.80, height: proxy.size.height * 0.80)
+                .background(Color(red: 0.08, green: 0.14, blue: 0.22))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .shadow(color: .black.opacity(0.5), radius: 20)
+            }
+        }
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 12, weight: .bold))
+            .foregroundColor(.white.opacity(0.7))
+            .padding(.horizontal, 14)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
+    }
+}
+
+private struct DeclarationHistoryRow: View {
+    let event: DeclarationEvent
+    let playerNames: [PlayerPosition: String]
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Text("#\(event.sequence)")
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundColor(.white.opacity(0.4))
+                .frame(width: 34, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Text(displayName(for: event.declarer))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white)
+                    Text(event.sequence == 1 ? "亮主" : "反主")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.yellow)
+                    Text(declarationText)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.white.opacity(0.75))
+                }
+
+                HStack(spacing: 6) {
+                    Text("已知牌")
+                        .font(.system(size: 10))
+                        .foregroundColor(.white.opacity(0.45))
+                    if event.revealedCards.isEmpty {
+                        Text("未记录具体牌")
+                            .font(.system(size: 10))
+                            .foregroundColor(.white.opacity(0.35))
+                    } else {
+                        ForEach(event.revealedCards, id: \.id) { card in
+                            cardChip(card: card)
+                        }
+                    }
                 }
             }
-            .frame(width: 480, height: 340)
-            .background(Color(red: 0.08, green: 0.14, blue: 0.22))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .shadow(color: .black.opacity(0.5), radius: 20)
+            Spacer()
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+    }
+
+    private var declarationText: String {
+        let suitText = event.suit?.rawValue ?? "无主"
+        let strengthText: String
+        switch event.strength {
+        case 1: strengthText = "单张"
+        case 2: strengthText = "对子"
+        case 3: strengthText = "王牌对"
+        default: strengthText = ""
+        }
+        return strengthText.isEmpty ? suitText : "\(suitText) · \(strengthText)"
+    }
+
+    private func displayName(for position: PlayerPosition) -> String {
+        let name = playerNames[position]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !name.isEmpty { return name }
+        return playerNames.isEmpty ? position.displayName : position.seatName
+    }
+
+    private func cardChip(card: Card) -> some View {
+        let isRed = card.suit?.color == "red"
+        return Text(card.shortDisplay)
+            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .foregroundColor(card.isJoker ? .yellow : (isRed ? .red : .white))
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background(Color.white.opacity(0.09))
+            .clipShape(RoundedRectangle(cornerRadius: 3))
     }
 }
 

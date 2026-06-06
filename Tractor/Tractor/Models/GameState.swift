@@ -20,6 +20,31 @@ struct TrumpDeclaration: Equatable, Codable {
     // strength: 1=单张级牌, 2=对子级牌, 3=王牌对(无主，大小王均可)
 }
 
+struct DeclarationEvent: Identifiable, Equatable, Codable {
+    let id: UUID
+    let declarer: PlayerPosition
+    let suit: Suit?
+    let strength: Int
+    let revealedCards: [Card]
+    let sequence: Int
+
+    init(
+        id: UUID = UUID(),
+        declarer: PlayerPosition,
+        suit: Suit?,
+        strength: Int,
+        revealedCards: [Card],
+        sequence: Int
+    ) {
+        self.id = id
+        self.declarer = declarer
+        self.suit = suit
+        self.strength = strength
+        self.revealedCards = revealedCards
+        self.sequence = sequence
+    }
+}
+
 // MARK: - Trick（一墩）
 struct Trick {
     var plays: [(position: PlayerPosition, cards: [Card])] = []
@@ -108,6 +133,7 @@ class GameState: ObservableObject {
 
     // 历史墩
     @Published var completedTricks: [Trick] = []
+    @Published var declarationEvents: [DeclarationEvent] = []
 
     // 一墩出完后的展示/结算锁。锁定期间禁止任何玩家继续操作。
     @Published var isResolvingTrick: Bool = false
@@ -143,6 +169,7 @@ class GameState: ObservableObject {
         kitty             = []
         currentTrick      = Trick(leadPosition: .south)
         completedTricks   = []
+        declarationEvents = []
         attackScore       = 0
         selectedCards     = []
         message           = ""

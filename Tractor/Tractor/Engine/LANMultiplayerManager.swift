@@ -43,6 +43,7 @@ struct GameSnapshot: Codable {
     let trumpSuit: Suit?
     let trumpRank: Rank
     let trumpDeclaration: TrumpDeclaration?
+    let declarationEvents: [DeclarationEvent]
     let dealtCount: Int
     let isDealingFast: Bool
     let isResolvingTrick: Bool

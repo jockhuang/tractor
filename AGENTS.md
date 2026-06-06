@@ -132,14 +132,14 @@ AI 的首要目标是最终得分结果，而不是单纯赢墩数量或保留�
 4. 出牌权控制
 5. 结构与主牌保全
 
-赢下 25 分墩的价值远高于赢多个空墩。`scoreLead` / `scoreFollow` / `trumpControlDecision` / `simulateCurrentTrick` 都应围绕 expected point swing 评分；当分差收益足够大时，可以牺牲对子、连对、主牌和控制牌保全。
+赢下 25 分墩的价值远高于赢多个空墩。`leadAssetScore` / `scoreFollow` / `trumpControlDecision` / `simulateCurrentTrick` 都应围绕 expected point swing 评分；当分差收益足够大时，可以牺牲对子、连对、主牌和控制牌保全。
 
 ### 决策流程（chooseCards）
 
 AI 已不再走单一固定优先级表。无论先手还是跟牌，都走同一套三段式流程：
 
 1. **生成候选**：多个生成器各自提出合理走法（`AIMove` = 牌 + `MoveKind` 标签）；并始终加入一个规则基线走法作兜底。
-2. **启发式打分**：`scoreLead` / `scoreFollow` 给每个候选打分，按分数从高到低排序（先手还会做合法性/策略过滤）。
+2. **启发式打分**：先手用 `leadAssetScore` 在当前资产层内部排序；跟牌用 `scoreFollow` 给候选打分。
 3. **蒙特卡洛模拟**：取分数最高的前 `monteCarloTopMoveCount`（=5）个候选，各模拟 `monteCarloSimulationCount`（=24）次对未知手牌的随机抽样对局，选综合分（模拟均分 + 启发式分 × 0.03）最高者出牌。
 
 `chooseCards`：当前墩无人出牌则先手，否则跟牌；甩牌失败的强制跟牌牌（`forcedCards`）跳过整套流程直接走规则路径。
@@ -154,73 +154,62 @@ AI 已不再走单一固定优先级表。无论先手还是跟牌，都走同�
 
 派生判断：`isEffectivelyBiggest`（双副牌中所有更大同花色牌已出完）、`manyBigTrumpsRemain`、`unplayedSuitPoints`、`allEnemiesVoid` / `voidEnemies`。
 
-### 先手候选生成器（leadCards）
+### 先手资产分层（leadCards）
 
-先手候选在启发式打分前先按规划优先级排序：
+先手不再把 Pair First / Tractor First / Slam Bonus / Absolute Winner Bonus 等局部规则堆到同一个候选池里互相抢分。`leadCards` 先把走法包装成 `LeadAsset`，按资产类别选择当前最该兑现的一层，再只在该层内部排序和 Monte Carlo。
 
-1. 安全甩牌
-2. 副牌绝对大牌：旁门 A、已知最大副牌单张、已知最大副牌对子
-3. 合法拖拉机
-4. 强对子
-5. 普通对子
-6. 长门/战略计划：引队友垫分、无主控制、主牌先手候选
-7. 小主过渡
-8. 弱牌
+资产层级：
+
+1. **Cashing Time-Sensitive Winners**：旁门 A、已知最大副牌单张、已知最大副牌对子、安全旁门控制组。它们会随敌方绝门而贬值，应尽早兑现。
+2. **Safe Slam / Control Groups**：安全甩牌或完整控制组，按整体评估；若存在 AKK / AAKK 这类组合，会压制其子走法，避免拆成 A、KK、AA、KK 分别比较。
+3. **Strong Structures**：拖拉机、级牌对、王对、强主对、强副牌对。它们是稳定控制资产，优先作为结构使用。
+4. **Initiative Building**：没有更高价值资产需要兑现时，才考虑队友垫分计划、长门发展、受控吊主、小主过渡。
+5. **Weak Disposal**：弱单、弱对、低价值清理。只有更高层资产都不存在时才进入选择。
 
 | 生成器 | 提出的走法 |
 |---|---|
-| `findSlamLeadCandidates` | 无法被压制的甩牌（见下） |
-| `findAbsoluteSideWinnerLeadCandidates` | 时效性副牌赢家：旁门 A、已知最大副牌单张、已知最大副牌对子 |
-| `findTractorLeadCandidates` | 所有逻辑花色中的合法拖拉机（含主牌/无主结构），跳过敌方已全绝的副花色 |
-| `findStrongPairLeadCandidates` | A/级牌/王对子、强主对、K/10 对、分牌对子 |
-| `findPairFirstLeadCandidates` | 所有对子资产，包括普通对子，保证对子作为结构参与排序和模拟 |
-| `findPartnerDumpLeadCandidates` | 队友已绝且仍有未出分牌的花色——领出让队友垫分 |
+| `buildLeadAssets` | 汇总全部先手资产，去重，并保留每组牌的最高资产层级 |
+| `findSlamLeadCandidates` | 无法被压制的甩牌 / 控制组；安全组合会压制其子走法 |
+| `findAbsoluteSideWinnerLeadCandidates` | 时效性副牌赢家：旁门 A、已知最大副牌单张、已知最大副牌对子；若属于安全控制组则不单独出 |
+| `findTractorLeadCandidates` | 强结构层候选：所有逻辑花色中的合法拖拉机，跳过敌方已全绝的副花色 |
+| `findStrongPairLeadCandidates` | 强结构层候选：A/级牌/王对子、强主对、K/10 对、分牌对子 |
 | `findNoTrumpControlLeadCandidates` | 无主局中的王/级牌/A 控制对子与连对 |
-| `findTrumpLeadCandidates` | 弱主牌单张；在庄方或主牌 ≥6 张时的强**安全**主牌；最弱主对 |
-| `findTrumpTransferLeadCandidates` | 一张低成本、不拆结构的小主（作为候选保留，由主动权/护分概念评估），仅主牌充足时生成 |
-| `findWeakLeadCandidates` | 最弱可领单张（始终可用的兜底） |
-| `leadCardsRuleBased` | 旧版有序启发式（见下），作为一个额外候选 |
+| `findPartnerDumpLeadCandidates` | 主动权建设：队友已绝且仍有未出分牌的花色——领出让队友垫分 |
+| `findLongSuitDevelopmentLeadCandidates` | 主动权建设：无兑现资产时发展长门 |
+| `findTrumpLeadCandidates` / `findTrumpTransferLeadCandidates` | 主动权建设：受控吊主或低成本小主过渡；主牌不套用旁门兑现紧迫性。小主过渡门槛为主牌 ≥3 且不拆结构 |
+| `findWeakLeadCandidates` / `findWeakPairDisposalLeadCandidates` | 弱处置层：弱单、弱对、低价值清理 |
 
-排序与 `filterAllowedLeadMoves` 后，Monte Carlo Top-N 会额外强制保留关键类型：
+`selectLeadAssetPool` 只取当前存在的最高资产层级进入 Monte Carlo。这样旁门 A 不会再被普通对子挤掉，AKK / AAKK 不会被拆成局部候选互相比较，普通对子只在弱处置层参与。Tier 4 内部若没有队友垫分计划且存在合法小主过渡，只让小主过渡进入模拟，避免空档期随手领弱副牌。
 
-- 副牌绝对赢家必须进模拟，避免旁门 A / 已知最大副牌被普通对子挤掉。
-- 合法拖拉机必须进模拟，避免 AAKK / KKQQ / QQJJ 被拆成 AA、KK 单独对子。
-- 强对子必须进模拟，避免被单张控制牌挤掉。
-- 普通对子也至少进模拟比较，避免散牌占满 Top-N。
+### 先手打分——点数优先的资产评分（leadAssetScore）
 
-### 先手打分——点数优先的战略概念（scoreLead）
+先手路径由 `leadAssetScore` 在资产层内部排序；跨层级优先级只由 `LeadAssetTier` 决定。若同层同分，只用 `leadAssetTieBreakScore` 按点数、安全性、张数和清门做稳定决胜，不再回落到旧的局部 bonus 评分。
 
-先手路径围绕点数优先的高层概念评估，取代大量互相冲突的零散加减分。每个概念只有一个权威评估函数，权重表 `LeadWeight` 直接读出优先级。
+`leadAssetScore` 的核心原则：
 
-`scoreLead` = 预期分差 + 安全门控 + 结构/控制成本（高分正收益时成本衰减）：
+- 时效性旁门赢家先兑现，不把旁门 A 的紧迫性套到主牌控制牌上。
+- 安全控制组按整体出牌评估，并压制其子候选。
+- 结构保留是成本，不是绝对目标；只有当没有更高层资产需要兑现时才主导。
+- 主动权建设低于实分兑现和稳定结构。
+- 弱牌清理只作为兜底。
 
-| # | 概念 | 函数 | 权重 | 含义 |
-|---|---|---|---|---|
-| 1 | Expected Point Swing 预期分差 | `leadPointSwingScore` / `expectedLeadPointSwing` | 75 | 先看本手分牌在胜率下的期望得失 |
-| 2 | Point Protection 护分 | `leadPointConcept` | 46 | 团队拿分（引出队友垫分）减去廉价送分/送权风险（被将吃、拿不稳的分） |
-| 3 | Trick Security 拿墩安全 | `leadWinProbability` | 34 | 我方能否真正拿下本墩（0–0.95） |
-| 4 | Control Asset Preservation 控制资源 | `controlSpendCost` | 34 | 本手消耗的控制资源；高分正收益时由 `pointSwingPreservationDamping` 降权 |
-| 5 | Structure Integrity 结构完整 | `structureFragmentationCost` + `wholeStructureControlValue` | 42 | 拆对子/连对要罚，但高分正收益时由 `pointSwingPreservationDamping` 降权 |
-| 6 | Asset Decay 资产衰减 | `assetDecayRealization` | 25 | 趁旁门 A / 旁门最大单张还能干净赢墩时兑现——杜绝一直攥着旁门 A |
-| 7 | Initiative Value 主动权 | `leadInitiativeValue` | 12 | 仅当能拿下、且手上有值得续打的资产时；空墩主动权低于实分收益 |
-
-这套单一层级从结构上消除了原来的特例：
+这套资产分层从结构上消除了原来的特例：
 
 - **AKK / AAKK** 作为整体评估——`structureFragmentationCost` 让「从 AAKK 里抽 AA 出」付出拆拖拉机的代价，整出拖拉机则得 `wholeStructureControlValue`，因此不再被拆成 AA→KK。
 - **拆任何对子**统一为 `pairAssetWeight` 的分级代价（强对/主对 0.9–1.0、K/10 0.7、分对 0.6、普通 0.4），不再是五个互相打架的惩罚。
-- **旁门 A 攥太久**由 Asset Decay 概念解决，而非临时的「兑现」规则。
+- **旁门 A 攥太久**由 Tier 1 Cashing Time-Sensitive Winners 解决，而非临时的「兑现」规则。
 - **先领非绝对赢的对子（再去出 A）**已避免：`wholeStructureControlValue` 只对「绝对赢」的结构给满额控制价值（`leadStructureDominant`，副牌用 `isEffectivelyBiggestPair`、主牌要大主/高主）。像 QQ（K/A 未现）这种非绝对赢的对子控制价值打到 ~30%，因此兑现一张稳赢的 A 会排在领一个「赌一把」的对子之前。
-- **小主过渡**被 Initiative + Point Protection 吸收（一张能把出牌权留在我方的便宜小主自然得分高，无需专门规则）。
+- **小主过渡**被放入主动权建设层；只有没有兑现/控制组/强结构资产时才参与比较。
 
-`.slam` 豁免结构拆罚（已验证不可压），并获 `slamLeadValue`；无主局对子/连对的 `wholeStructureControlValue` 更高。
+安全甩牌 / 控制组作为 Tier 1 或 Tier 2 的整体资产评估；无主局对子/连对的 `wholeStructureControlValue` 更高。
 
-### 先手合法性过滤（filterAllowedLeadMoves / allowTrumpLead）
+### 先手合法性过滤（filterAllowedLeadAssets / allowTrumpLead）
 
-打分后主牌先手由 `allowTrumpLead` 把关：早期一般不许领主，除非手牌偏少（剩 ≤5 墩）、主牌多（≥8 张或 ≥4 张强主）、副牌比主牌还多、需保护的暴露分多、或主牌保对价值高。非主走法始终放行。
+资产生成后由 `filterAllowedLeadAssets` 过滤；主牌先手由 `allowTrumpLead` 把关。小主过渡可在 Tier 4 空档期通过；其他主牌早期一般不许领，除非手牌偏少（剩 ≤5 墩）、主牌多（≥8 张或 ≥4 张强主）、副牌比主牌还多、需保护的暴露分多、或主牌保对价值高。非主走法始终放行。
 
 ### 先手规则基线（leadCardsRuleBased）
 
-旧版有序启发式，现作为一个候选（也是最终兜底）：
+旧版有序启发式保留为函数实现参考，但 `leadCards` 不再把它作为额外候选；真实先手选择由 `buildLeadAssets` 的资产分层驱动。
 
 0. **甩牌**（`findSlamLead`）
 1. **当前已是最大的非主牌**——优先对子，否则最大单张（跳过敌方全绝的花色）
@@ -345,7 +334,7 @@ AI 已不再走单一固定优先级表。无论先手还是跟牌，都走同�
 
 ### 蒙特卡洛择优（monteCarloBestMove）
 
-先手与跟牌最后都对启发式排名前 5 的候选做模拟：
+先手只对当前最高资产层级内 `leadAssetScore` 排名前 5 的候选做模拟；跟牌仍对启发式排名前 5 的候选做模拟：
 
 - 每个候选模拟 24 次。每次从「双副牌减去所有已知牌」中抽样其余三家手牌（`sampleHiddenHands`），用确定性种子随机数（`MonteCarloRNG` + `monteCarloSeed`）保证可复现。抽样会尊重各家已暴露的绝门（不会把某逻辑花色的牌发给已绝该门的玩家）；底牌只有当决策 AI **本人是庄家**时才视为已知，非庄家把底牌留在未知池，但仍会剔除可推断必在底牌中的牌（当三家对手都绝某逻辑花色时，该花色剩余的牌必然都在底牌里）。
 - `simulateCurrentTrick` 打出候选后，让其余玩家用轻量策略（`monteCarloFollowCards`）跟到本墩结束，并对结果评分：以 `capturedPoints×8×pointPressureBonus` 为核心，辅以很小的赢墩值、折扣后的剩余资产、主动权调整和高分场景下衰减后的保主惩罚。模拟目标是最终分差，不是空墩数量。
@@ -432,10 +421,10 @@ startNewGame()
 | 修改甩牌罚分计算 | `TrickEvaluator.slamPenaltyPoints` |
 | 修改甩牌强制出牌逻辑 | `GameEngine.analyzeSlamLead` |
 | 修改赢墩判断 | `TrickEvaluator.beatsPlay` / `winner` |
-| 修改 AI 先手策略 | `AIPlayer.leadCards`（候选）/ `scoreLead`（权重）/ `leadCardsRuleBased`（基线） |
-| 调整 AI 先手打分权重 / 优先级 | `AIPlayer.LeadWeight`（六大概念权重） |
-| 调整单个先手概念 | `leadWinProbability`（拿墩）·`leadPointConcept`（护分）·`controlSpendCost`（控制）·`structureFragmentationCost`+`wholeStructureControlValue`+`pairAssetWeight`（结构）·`assetDecayRealization`（衰减）·`leadInitiativeValue`（主动权） |
-| 调整拆对子/结构惩罚 | `AIPlayer.structureBreakPenalty` / `strongStructureBreakPenalty`（及其在 `scoreLead` / `scoreFollow` 中的乘数） |
+| 修改 AI 先手策略 | `AIPlayer.leadCards` / `buildLeadAssets` / `selectLeadAssetPool` |
+| 调整 AI 先手打分权重 / 优先级 | `AIPlayer.leadAssetScore` / `LeadAssetTier` |
+| 调整单个先手概念 | `findAbsoluteSideWinnerLeadCandidates`（兑现赢家）·`findSlamLeadCandidates`（安全控制组）·`findTractorLeadCandidates` / `findStrongPairLeadCandidates`（强结构）·`findTrumpTransferLeadCandidates` / `findLongSuitDevelopmentLeadCandidates`（主动权建设） |
+| 调整拆对子/结构惩罚 | `AIPlayer.structureBreakPenalty` / `strongStructureBreakPenalty`（跟牌）与 `structureFragmentationCost` / `mixedSlamFragmentationCost`（先手资产完整性） |
 | 修改 AI 蒙特卡洛模拟 | `AIPlayer.monteCarloBestMove` / `simulateCurrentTrick` / `monteCarloTopMoveCount` / `monteCarloSimulationCount` |
 | 修改 AI 甩牌领出条件 | `AIPlayer.findSlamLead` / `isEffectivelyBiggestSingle` / `isEffectivelyBiggestPair` |
 | 修改 AI 跟牌策略 | `AIPlayer.followCards`（候选）/ `scoreFollow`（权重）/ `followTractor` / `followPair` |
