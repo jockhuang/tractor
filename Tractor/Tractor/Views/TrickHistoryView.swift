@@ -26,15 +26,15 @@ struct TrickHistoryPanel: View {
                     // 标题栏
                     HStack {
                         Text("本局记录")
-                            .font(.headline.bold())
+                            .font(.title2.bold())
                             .foregroundColor(.white)
                         Spacer()
                         Text("\(declarationEvents.count) 次亮主 · \(tricks.count) 墩")
-                            .font(.caption)
+                            .font(.system(size: 15))
                             .foregroundColor(.white.opacity(0.5))
                         Button(action: onClose) {
                             Image(systemName: "xmark.circle.fill")
-                                .font(.title3)
+                                .font(.title)
                                 .foregroundColor(.white.opacity(0.6))
                         }
                         .padding(.leading, 8)
@@ -86,11 +86,11 @@ struct TrickHistoryPanel: View {
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: 12, weight: .bold))
+            .font(.system(size: 16, weight: .bold))
             .foregroundColor(.white.opacity(0.7))
             .padding(.horizontal, 14)
-            .padding(.top, 8)
-            .padding(.bottom, 6)
+            .padding(.top, 10)
+            .padding(.bottom, 8)
     }
 }
 
@@ -101,30 +101,30 @@ private struct DeclarationHistoryRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             Text("#\(event.sequence)")
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .font(.system(size: 14, weight: .bold, design: .monospaced))
                 .foregroundColor(.white.opacity(0.4))
-                .frame(width: 34, alignment: .leading)
+                .frame(width: 40, alignment: .leading)
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     Text(displayName(for: event.declarer))
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(.white)
                     Text(event.sequence == 1 ? "亮主" : "反主")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: 14, weight: .bold))
                         .foregroundColor(.yellow)
                     Text(declarationText)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: 16, weight: .medium))
                         .foregroundColor(.white.opacity(0.75))
                 }
 
                 HStack(spacing: 6) {
                     Text("已知牌")
-                        .font(.system(size: 10))
+                        .font(.system(size: 13))
                         .foregroundColor(.white.opacity(0.45))
                     if event.revealedCards.isEmpty {
                         Text("未记录具体牌")
-                            .font(.system(size: 10))
+                            .font(.system(size: 13))
                             .foregroundColor(.white.opacity(0.35))
                     } else {
                         ForEach(event.revealedCards, id: \.id) { card in
@@ -136,7 +136,7 @@ private struct DeclarationHistoryRow: View {
             Spacer()
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 9)
+        .padding(.vertical, 11)
     }
 
     private var declarationText: String {
@@ -160,9 +160,9 @@ private struct DeclarationHistoryRow: View {
     private func cardChip(card: Card) -> some View {
         let isRed = card.suit?.color == "red"
         return Text(card.shortDisplay)
-            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .font(.system(size: 13, weight: .medium, design: .monospaced))
             .foregroundColor(card.isJoker ? .yellow : (isRed ? .red : .white))
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 5)
             .padding(.vertical, 2)
             .background(Color.white.opacity(0.09))
             .clipShape(RoundedRectangle(cornerRadius: 3))
@@ -180,17 +180,17 @@ private struct TrickHistoryRow: View {
         HStack(alignment: .center, spacing: 0) {
             // 墩号
             Text("#\(index)")
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .font(.system(size: 14, weight: .bold, design: .monospaced))
                 .foregroundColor(.white.opacity(0.4))
-                .frame(width: 30, alignment: .leading)
+                .frame(width: 38, alignment: .leading)
 
             // 先手标记
             Text(displayName(for: trick.leadPosition))
-                .font(.system(size: 10))
+                .font(.system(size: 13))
                 .foregroundColor(.white.opacity(0.5))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
-                .frame(width: 42, alignment: .center)
+                .frame(width: 52, alignment: .center)
 
             // 四家出牌
             ForEach(orderedPlays, id: \.position.rawValue) { play in
@@ -202,18 +202,18 @@ private struct TrickHistoryRow: View {
             // 赢家
             HStack(spacing: 3) {
                 Image(systemName: "crown.fill")
-                    .font(.system(size: 9))
+                    .font(.system(size: 12))
                     .foregroundColor(.yellow)
                 Text(displayName(for: winner))
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.yellow)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
-            .frame(width: 64, alignment: .trailing)
+            .frame(width: 80, alignment: .trailing)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 7)
+        .padding(.vertical, 10)
     }
 
     /// 按出牌顺序排列（先手打头）
@@ -231,7 +231,7 @@ private struct TrickHistoryRow: View {
     private func playerColumn(play: (position: PlayerPosition, cards: [Card])) -> some View {
         VStack(alignment: .center, spacing: 2) {
             Text(displayName(for: play.position))
-                .font(.system(size: 9))
+                .font(.system(size: 12))
                 .foregroundColor(play.position == trick.leadPosition
                     ? .white.opacity(0.8) : .white.opacity(0.4))
                 .lineLimit(1)
@@ -245,7 +245,7 @@ private struct TrickHistoryRow: View {
                 }
                 if play.cards.count > 4 {
                     Text("+\(play.cards.count - 4)")
-                        .font(.system(size: 8))
+                        .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.4))
                 }
             }
@@ -254,7 +254,7 @@ private struct TrickHistoryRow: View {
             let pts = play.cards.reduce(0) { $0 + $1.pointValue }
             if pts > 0 {
                 Text("+\(pts)")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.system(size: 12, weight: .bold))
                     .foregroundColor(.orange)
             }
         }
@@ -270,10 +270,10 @@ private struct TrickHistoryRow: View {
     private func cardChip(card: Card) -> some View {
         let isRed = card.suit?.color == "red"
         return Text(card.shortDisplay)
-            .font(.system(size: 9, weight: .medium, design: .monospaced))
+            .font(.system(size: 12, weight: .medium, design: .monospaced))
             .foregroundColor(card.isJoker ? .yellow : (isRed ? .red : .white))
-            .padding(.horizontal, 3)
-            .padding(.vertical, 1)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
             .background(Color.white.opacity(0.08))
             .clipShape(RoundedRectangle(cornerRadius: 3))
     }

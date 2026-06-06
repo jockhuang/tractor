@@ -29,10 +29,16 @@
 		E0E6F7B44929E5AAB955F6DD /* PlayerHandView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB1E689C7FBD979E299D6C33 /* PlayerHandView.swift */; };
 		E36D48B2BE47B429074048E2 /* TrickAreaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1895631AC0027FE299A34C21 /* TrickAreaView.swift */; };
 		E5641B86C1EAE4FBC33316DC /* AIPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 430E2C1FD0EDE7513C6AA059 /* AIPlayer.swift */; };
+		AABB02000000000000000002 /* AIPlayer+Lead.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABB02000000000000000001 /* AIPlayer+Lead.swift */; };
+		AABB02000000000000000004 /* AIPlayer+Follow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABB02000000000000000003 /* AIPlayer+Follow.swift */; };
+		AABB02000000000000000006 /* AIPlayer+Scoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABB02000000000000000005 /* AIPlayer+Scoring.swift */; };
+		AABB02000000000000000008 /* AIPlayer+MonteCarlo.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABB02000000000000000007 /* AIPlayer+MonteCarlo.swift */; };
+		AABB0200000000000000000A /* AIPlayer+Debug.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABB02000000000000000009 /* AIPlayer+Debug.swift */; };
 		EE11223344556677889900FF /* card_slap_on_table.wav in Resources */ = {isa = PBXBuildFile; fileRef = EE11223344556677889900EE /* card_slap_on_table.wav */; };
 		F7A77112F7889361098812F4 /* Card.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5513BD913D4ECE1D2EC86200 /* Card.swift */; };
 		F7B235559E4A7603B1BBD6F2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 671E5B54412D9F8033A8454C /* Assets.xcassets */; };
 		F92468377D607B4A598C1E1B /* RoundResultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E6A21A7043996B65A64A6AE /* RoundResultView.swift */; };
+		AABB01000000000000000004 /* AITacticalModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABB01000000000000000003 /* AITacticalModeTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -43,6 +49,11 @@
 		1895631AC0027FE299A34C21 /* TrickAreaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrickAreaView.swift; sourceTree = "<group>"; };
 		2222334455667788990011DD /* game_over_sound.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = game_over_sound.wav; sourceTree = "<group>"; };
 		430E2C1FD0EDE7513C6AA059 /* AIPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPlayer.swift; sourceTree = "<group>"; };
+		AABB02000000000000000001 /* AIPlayer+Lead.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIPlayer+Lead.swift"; sourceTree = "<group>"; };
+		AABB02000000000000000003 /* AIPlayer+Follow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIPlayer+Follow.swift"; sourceTree = "<group>"; };
+		AABB02000000000000000005 /* AIPlayer+Scoring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIPlayer+Scoring.swift"; sourceTree = "<group>"; };
+		AABB02000000000000000007 /* AIPlayer+MonteCarlo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIPlayer+MonteCarlo.swift"; sourceTree = "<group>"; };
+		AABB02000000000000000009 /* AIPlayer+Debug.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIPlayer+Debug.swift"; sourceTree = "<group>"; };
 		48E5EE73804B88FAEFDA2869 /* KittyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KittyView.swift; sourceTree = "<group>"; };
 		5513BD913D4ECE1D2EC86200 /* Card.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Card.swift; sourceTree = "<group>"; };
 		63D879AC0F3F4A45B6B75612 /* LANMultiplayerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LANMultiplayerManager.swift; sourceTree = "<group>"; };
@@ -64,10 +75,29 @@
 		E7A0F9BE6DB640A1CF5905EE /* Player.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Player.swift; sourceTree = "<group>"; };
 		EE11223344556677889900EE /* card_slap_on_table.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = card_slap_on_table.wav; sourceTree = "<group>"; };
 		F3CE76666EC8CF3A19C2C9E6 /* TrickEvaluator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrickEvaluator.swift; sourceTree = "<group>"; };
+		AABB01000000000000000003 /* AITacticalModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AITacticalModeTests.swift; sourceTree = "<group>"; };
+		AABB01000000000000000002 /* TractorTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TractorTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXContainerItemProxy section */
+		AABB0100000000000000000D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E92819776D1D900150F17949;
+			remoteInfo = Tractor;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		29B2D46AA747A59804D46E1F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AABB01000000000000000006 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -90,8 +120,17 @@
 			isa = PBXGroup;
 			children = (
 				E46AF5FC07E59169747B3EEA /* Tractor */,
+				AABB01000000000000000008 /* AITests */,
 				BF7A2D27A78D590BDEF15AF2 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		AABB01000000000000000008 /* AITests */ = {
+			isa = PBXGroup;
+			children = (
+				AABB01000000000000000003 /* AITacticalModeTests.swift */,
+			);
+			path = AITests;
 			sourceTree = "<group>";
 		};
 		78EF4B0EA3FDA2A792BCF074 /* Views */ = {
@@ -114,6 +153,7 @@
 			isa = PBXGroup;
 			children = (
 				A97C29AD63741CF438998CE6 /* Tractor Game.app */,
+				AABB01000000000000000002 /* TractorTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -125,6 +165,11 @@
 				F3CE76666EC8CF3A19C2C9E6 /* TrickEvaluator.swift */,
 				CFBC7A8976E032FC4F3B7CAD /* GameEngine.swift */,
 				430E2C1FD0EDE7513C6AA059 /* AIPlayer.swift */,
+				AABB02000000000000000001 /* AIPlayer+Lead.swift */,
+				AABB02000000000000000003 /* AIPlayer+Follow.swift */,
+				AABB02000000000000000005 /* AIPlayer+Scoring.swift */,
+				AABB02000000000000000007 /* AIPlayer+MonteCarlo.swift */,
+				AABB02000000000000000009 /* AIPlayer+Debug.swift */,
 				63D879AC0F3F4A45B6B75612 /* LANMultiplayerManager.swift */,
 				AA11223344556677889900AA /* SoundManager.swift */,
 			);
@@ -179,6 +224,23 @@
 			productReference = A97C29AD63741CF438998CE6 /* Tractor Game.app */;
 			productType = "com.apple.product-type.application";
 		};
+		AABB01000000000000000001 /* TractorTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AABB0100000000000000000B /* Build configuration list for PBXNativeTarget "TractorTests" */;
+			buildPhases = (
+				AABB01000000000000000005 /* Sources */,
+				AABB01000000000000000006 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				AABB0100000000000000000C /* PBXTargetDependency */,
+			);
+			name = TractorTests;
+			productName = TractorTests;
+			productReference = AABB01000000000000000002 /* TractorTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -191,6 +253,10 @@
 				TargetAttributes = {
 					E92819776D1D900150F17949 = {
 						CreatedOnToolsVersion = 15.3;
+					};
+					AABB01000000000000000001 = {
+						CreatedOnToolsVersion = 15.3;
+						TestTargetID = E92819776D1D900150F17949;
 					};
 				};
 			};
@@ -209,6 +275,7 @@
 			projectRoot = "";
 			targets = (
 				E92819776D1D900150F17949 /* Tractor */,
+				AABB01000000000000000001 /* TractorTests */,
 			);
 		};
 /* End PBXProject section */
@@ -243,6 +310,11 @@
 				45A7669070DAE1B2509547C6 /* TrickEvaluator.swift in Sources */,
 				411CB30A47B3933C8D9261AF /* GameEngine.swift in Sources */,
 				E5641B86C1EAE4FBC33316DC /* AIPlayer.swift in Sources */,
+				AABB02000000000000000002 /* AIPlayer+Lead.swift in Sources */,
+				AABB02000000000000000004 /* AIPlayer+Follow.swift in Sources */,
+				AABB02000000000000000006 /* AIPlayer+Scoring.swift in Sources */,
+				AABB02000000000000000008 /* AIPlayer+MonteCarlo.swift in Sources */,
+				AABB0200000000000000000A /* AIPlayer+Debug.swift in Sources */,
 				9D4CFD2F0F4D4FC7A7010C2D /* LANMultiplayerManager.swift in Sources */,
 				5E0A467A71D79627922C7A40 /* CardView.swift in Sources */,
 				E0E6F7B44929E5AAB955F6DD /* PlayerHandView.swift in Sources */,
@@ -257,7 +329,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AABB01000000000000000005 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AABB01000000000000000004 /* AITacticalModeTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		AABB0100000000000000000C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E92819776D1D900150F17949 /* Tractor */;
+			targetProxy = AABB0100000000000000000D /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		4DC7B479A29173674AFD7BAC /* Release */ = {
@@ -410,6 +498,48 @@
 			};
 			name = Release;
 		};
+		AABB01000000000000000009 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = QF9FSRHDKH;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jock.game.tractorTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Tractor Game.app/Tractor Game";
+			};
+			name = Debug;
+		};
+		AABB0100000000000000000A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = QF9FSRHDKH;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jock.game.tractorTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Tractor Game.app/Tractor Game";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -427,6 +557,15 @@
 			buildConfigurations = (
 				71307F56FE0F050CBFE8BD6D /* Debug */,
 				D4147F9DEB4AD84BF3A14790 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AABB0100000000000000000B /* Build configuration list for PBXNativeTarget "TractorTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AABB01000000000000000009 /* Debug */,
+				AABB0100000000000000000A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
