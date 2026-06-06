@@ -120,6 +120,20 @@ Views/
 
 ## AI 出牌优先级（AIPlayer）
 
+### Point-Centric Strategy（点数优先）
+
+AI 的首要目标是最终得分结果，而不是单纯赢墩数量或保留牌型资源。
+
+所有战略决策都以预期分差为第一口径：
+
+1. 预期己方得分
+2. 预期拒绝对手得分
+3. 拿墩安全
+4. 出牌权控制
+5. 结构与主牌保全
+
+赢下 25 分墩的价值远高于赢多个空墩。`scoreLead` / `scoreFollow` / `trumpControlDecision` / `simulateCurrentTrick` 都应围绕 expected point swing 评分；当分差收益足够大时，可以牺牲对子、连对、主牌和控制牌保全。
+
 ### 决策流程（chooseCards）
 
 AI 已不再走单一固定优先级表。无论先手还是跟牌，都走同一套三段式流程：
@@ -174,20 +188,21 @@ AI 已不再走单一固定优先级表。无论先手还是跟牌，都走同�
 - 强对子必须进模拟，避免被单张控制牌挤掉。
 - 普通对子也至少进模拟比较，避免散牌占满 Top-N。
 
-### 先手打分——六大战略概念（scoreLead）
+### 先手打分——点数优先的战略概念（scoreLead）
 
-先手路径围绕六大高层概念评估，取代大量互相冲突的零散加减分。每个概念只有一个权威评估函数，权重表 `LeadWeight` 直接读出优先级。
+先手路径围绕点数优先的高层概念评估，取代大量互相冲突的零散加减分。每个概念只有一个权威评估函数，权重表 `LeadWeight` 直接读出优先级。
 
-`scoreLead` = 安全门控 + 六项加权融合：
+`scoreLead` = 预期分差 + 安全门控 + 结构/控制成本（高分正收益时成本衰减）：
 
 | # | 概念 | 函数 | 权重 | 含义 |
 |---|---|---|---|---|
-| 1 | Trick Security 拿墩安全 | `leadWinProbability` | 55 | 我方能否真正拿下本墩（0–0.95） |
-| 6 | Point Protection 护分 | `leadPointConcept` | 40 | 团队拿分（引出队友垫分）减去廉价送分/送权风险（被将吃、拿不稳的分）。作为安全门控 |
-| 2 | Control Asset Preservation 控制资源 | `controlSpendCost` | 45 | 本手消耗的控制资源：王 1.0、级牌 0.8、主 A 0.7、旁门 A 0.5、其他最大牌 0.35 |
-| 3 | Structure Integrity 结构完整 | `structureFragmentationCost` + `wholeStructureControlValue` | 60 | 拆对子/连对要罚，整出**绝对赢**的强结构才有奖。AKK 当一组、AAKK 当一拖拉机 |
-| 4 | Asset Decay 资产衰减 | `assetDecayRealization` | 25 | 趁旁门 A / 旁门最大单张还能干净赢墩时兑现——杜绝一直攥着旁门 A |
-| 5 | Initiative Value 主动权 | `leadInitiativeValue` | 20 | 仅当能拿下、且手上有值得续打的资产时 |
+| 1 | Expected Point Swing 预期分差 | `leadPointSwingScore` / `expectedLeadPointSwing` | 75 | 先看本手分牌在胜率下的期望得失 |
+| 2 | Point Protection 护分 | `leadPointConcept` | 46 | 团队拿分（引出队友垫分）减去廉价送分/送权风险（被将吃、拿不稳的分） |
+| 3 | Trick Security 拿墩安全 | `leadWinProbability` | 34 | 我方能否真正拿下本墩（0–0.95） |
+| 4 | Control Asset Preservation 控制资源 | `controlSpendCost` | 34 | 本手消耗的控制资源；高分正收益时由 `pointSwingPreservationDamping` 降权 |
+| 5 | Structure Integrity 结构完整 | `structureFragmentationCost` + `wholeStructureControlValue` | 42 | 拆对子/连对要罚，但高分正收益时由 `pointSwingPreservationDamping` 降权 |
+| 6 | Asset Decay 资产衰减 | `assetDecayRealization` | 25 | 趁旁门 A / 旁门最大单张还能干净赢墩时兑现——杜绝一直攥着旁门 A |
+| 7 | Initiative Value 主动权 | `leadInitiativeValue` | 12 | 仅当能拿下、且手上有值得续打的资产时；空墩主动权低于实分收益 |
 
 这套单一层级从结构上消除了原来的特例：
 
@@ -247,7 +262,7 @@ AI 已不再走单一固定优先级表。无论先手还是跟牌，都走同�
 - **花主牌的走法**：统一走 Trump Control Decision（见下），不再分别在吊主、将吃、盖吃、队友保护、抢主动权里写零散规则。
 - **非主走法**：走通用 `FollowWinClass` / `followWinClassScore`。锁定赢墩奖励最高，暂时赢墩按分数和送分风险折扣，无法赢时尽量垫 0 分牌。
 
-主/非主都共享通用项：安全时才奖励垫分、不安全垫分受罚、清门小奖、拆结构惩罚（`structureBreakPenalty` / `strongStructureBreakPenalty`）。`MoveKind` 微调：baseline +5、support +8（队友领先时）、discard +4（对手领先时），非主 win ±8/−12。
+主/非主都共享通用项：先计算 `followPointSwingScore`，安全时才奖励垫分、不安全垫分受罚、清门小奖、拆结构惩罚（`structureBreakPenalty` / `strongStructureBreakPenalty`）。拆结构惩罚会按 `pointPressureDamping` 随当前墩总分降低，确保 20–25 分争夺能压过保结构。`MoveKind` 微调：baseline +5、support +8（队友领先时）、discard +4（对手领先时），非主 win ±8/−12。
 
 **统一主牌控墩模型（Trump Control Decision）：**
 
@@ -333,7 +348,7 @@ AI 已不再走单一固定优先级表。无论先手还是跟牌，都走同�
 先手与跟牌最后都对启发式排名前 5 的候选做模拟：
 
 - 每个候选模拟 24 次。每次从「双副牌减去所有已知牌」中抽样其余三家手牌（`sampleHiddenHands`），用确定性种子随机数（`MonteCarloRNG` + `monteCarloSeed`）保证可复现。抽样会尊重各家已暴露的绝门（不会把某逻辑花色的牌发给已绝该门的玩家）；底牌只有当决策 AI **本人是庄家**时才视为已知，非庄家把底牌留在未知池，但仍会剔除可推断必在底牌中的牌（当三家对手都绝某逻辑花色时，该花色剩余的牌必然都在底牌里）。
-- `simulateCurrentTrick` 打出候选后，让其余玩家用轻量策略（`monteCarloFollowCards`）跟到本墩结束，并对结果评分：`capturedPoints×2 + wonTrickValue×2 + remainingAssetValue + 主动权调整 − earlyTrumpPenalty×3`，另对送分小扣、对用 0 分牌赢墩小奖。
+- `simulateCurrentTrick` 打出候选后，让其余玩家用轻量策略（`monteCarloFollowCards`）跟到本墩结束，并对结果评分：以 `capturedPoints×8×pointPressureBonus` 为核心，辅以很小的赢墩值、折扣后的剩余资产、主动权调整和高分场景下衰减后的保主惩罚。模拟目标是最终分差，不是空墩数量。
 - 最终选择 = 模拟均分 + 启发式分 × 0.03（启发式仅作轻量决胜）。常量见 `monteCarloTopMoveCount` / `monteCarloSimulationCount`。
 
 ---

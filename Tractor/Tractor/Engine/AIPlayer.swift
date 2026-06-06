@@ -1592,19 +1592,20 @@ struct AIPlayer {
         return moves
     }
 
-    // MARK: - 统一先手评估（六大战略概念，安全门控 + 加权融合）
+    // MARK: - 统一先手评估（点数优先，安全门控 + 加权融合）
     //
     // 取代旧版 ~20 个互相冲突的零散加减分。每个概念只有一个权威评估函数，
-    // 权重直接读出优先级。详见各 leadXxx 概念函数。
+    // 权重直接读出优先级。最终目标是预期分差；结构和主牌保全只在分差不足以覆盖成本时主导。
 
-    /// 先手六大概念的权重（数值越大优先级越高）。
+    /// 先手概念权重（数值越大优先级越高）。分差优先，空墩主动权低于实分收益。
     private enum LeadWeight {
-        static let security        = 55.0   // 1. Trick Security：能否真正拿下本墩
-        static let pointProtection = 40.0   // 6. Point Protection：团队拿分 / 不廉价送分送权（安全门控）
-        static let control         = 45.0   // 2. Control Asset Preservation：消耗控制资源的代价
-        static let structure       = 60.0   // 3. Structure Integrity：把对子/连对/甩牌当整体
-        static let decay           = 25.0   // 4. Asset Decay：及时兑现会贬值的资产
-        static let initiative      = 20.0   // 5. Initiative Value：赢墩后是否带来有用出牌权
+        static let pointSwing      = 75.0   // 1. Expected Point Swing：预期得分 / 拒分
+        static let pointProtection = 46.0   // 2. Point Protection：团队拿分 / 不廉价送分送权
+        static let security        = 34.0   // 3. Trick Security：能否真正拿下本墩
+        static let control         = 34.0   // 4. Control Asset Preservation：消耗控制资源的代价
+        static let structure       = 42.0   // 5. Structure Integrity：把对子/连对/甩牌当整体
+        static let decay           = 25.0   // 6. Asset Decay：及时兑现会贬值的资产
+        static let initiative      = 12.0   // 7. Initiative Value：赢墩后是否带来有用出牌权
     }
 
     private static func scoreLead(
@@ -1621,19 +1622,24 @@ struct AIPlayer {
         let leadSuit = CardComparator.logicalSuit(first, trumpSuit: ts, trumpRank: tr)
         let isSlam = move.kind == .slam
 
-        // 1. Trick Security ── 我方能否真正拿下这一墩（而非仅暂时领先）
+        // 1. Expected Point Swing ── 实分优先；高分且能拿稳时允许牺牲结构和控制资源。
         let security = leadWinProbability(cards, hand: hand, ts: ts, tr: tr, ctx: ctx)
-        var score = security * LeadWeight.security
+        let pointSwing = expectedLeadPointSwing(cards, security: security)
+        let preservationDamp = pointSwingPreservationDamping(pointSwing)
+        var score = leadPointSwingScore(cards, security: security) * LeadWeight.pointSwing
 
-        // 6. Point Protection ── 团队拿分（引出队友垫分等）减去廉价送分/送权的风险
+        // 2. Trick Security ── 我方能否真正拿下这一墩（而非仅暂时领先）
+        score += security * LeadWeight.security
+
+        // 3. Point Protection ── 团队拿分（引出队友垫分等）减去廉价送分/送权的风险
         score += leadPointConcept(cards, leadSuit: leadSuit, position: position,
                                   ts: ts, tr: tr, ctx: ctx, security: security)
             * LeadWeight.pointProtection
 
-        // 2. Control Asset Preservation ── 本手消耗的控制资源价值（王/级牌/主控/旁门A/大牌）
-        score -= controlSpendCost(cards, ts: ts, tr: tr, ctx: ctx) * LeadWeight.control
+        // 4. Control Asset Preservation ── 高分正收益足够大时，保主/保控制的权重下降
+        score -= controlSpendCost(cards, ts: ts, tr: tr, ctx: ctx) * LeadWeight.control * preservationDamp
 
-        // 3. Structure Integrity ── 拆散更大结构的代价（AKK 当一组，AAKK 当一拖拉机）；
+        // 5. Structure Integrity ── 拆散更大结构的代价（AKK 当一组，AAKK 当一拖拉机）；
         //    甩牌已验证为更高价值牌型，豁免结构拆罚。整出强结构则给正向控制价值。
         let fragmentation = isSlam
             ? mixedSlamFragmentationCost(
@@ -1641,7 +1647,7 @@ struct AIPlayer {
             ) * 0.35
             : structureFragmentationCost(cards, hand: hand, ts: ts, tr: tr)
                 + mixedSlamFragmentationCost(cards: cards, hand: hand, position: position, ts: ts, tr: tr, ctx: ctx)
-        score -= fragmentation * LeadWeight.structure
+        score -= fragmentation * LeadWeight.structure * preservationDamp
         score += wholeStructureControlValue(cards, hand: hand, ts: ts, tr: tr, ctx: ctx) * LeadWeight.structure
         if isSlam {
             score += mixedSlamControlValue(cards, hand: hand, ts: ts, tr: tr, ctx: ctx) * LeadWeight.structure
@@ -1657,6 +1663,45 @@ struct AIPlayer {
 
         if isSlam { score += slamLeadValue(cards, ts: ts, tr: tr) }
         return score
+    }
+
+    // ── 点数优先：所有 AI 评分的共同口径 ──────────────────────────────
+    private static func expectedLeadPointSwing(_ cards: [Card], security: Double) -> Double {
+        let points = Double(cards.reduce(0) { $0 + $1.pointValue })
+        guard points > 0 else { return 0 }
+        return points * (security * 2.0 - 1.0)
+    }
+
+    private static func leadPointSwingScore(_ cards: [Card], security: Double) -> Double {
+        let swing = expectedLeadPointSwing(cards, security: security)
+        guard swing != 0 else { return 0 }
+        let pressure = pointPressureBonus(totalPoints: cards.reduce(0) { $0 + $1.pointValue })
+        return swing / 10.0 * pressure
+    }
+
+    private static func pointPressureBonus(totalPoints: Int) -> Double {
+        if totalPoints >= 25 { return 2.2 }
+        if totalPoints >= 20 { return 1.8 }
+        if totalPoints >= 15 { return 1.45 }
+        if totalPoints >= 10 { return 1.2 }
+        return 1.0
+    }
+
+    private static func pointPressureDamping(totalPoints: Int) -> Double {
+        if totalPoints >= 25 { return 0.25 }
+        if totalPoints >= 20 { return 0.35 }
+        if totalPoints >= 15 { return 0.50 }
+        if totalPoints >= 10 { return 0.70 }
+        if totalPoints >= 5 { return 0.85 }
+        return 1.0
+    }
+
+    private static func pointSwingPreservationDamping(_ pointSwing: Double) -> Double {
+        if pointSwing >= 25 { return 0.25 }
+        if pointSwing >= 18 { return 0.35 }
+        if pointSwing >= 12 { return 0.50 }
+        if pointSwing >= 7 { return 0.70 }
+        return 1.0
     }
 
     // ── 概念 6：Point Protection（带符号：团队拿分为正，送分/送权为负）──
@@ -2361,8 +2406,19 @@ struct AIPlayer {
         let breakPenalty = structureBreakPenalty(cards: move.cards, hand: hand, ts: ts, tr: tr)
         let strongBreakPenalty = strongStructureBreakPenalty(cards: move.cards, hand: hand, ts: ts, tr: tr)
         let clearsSuit = clearsLogicalSuit(cards: move.cards, hand: hand, evaluator: evaluator)
+        let totalPoints = trickPoints + playedPoints
+        let preservationDamp = pointPressureDamping(totalPoints: totalPoints)
 
         var score = 0.0
+        score += followPointSwingScore(
+            winClass: winClass,
+            partnerWinningBefore: partnerWinningBefore,
+            trickSecureBefore: trickSecureBefore,
+            trickSecureAfter: trickSecureAfter,
+            trickPoints: trickPoints,
+            playedPoints: playedPoints,
+            isLastPlayer: ctx.isLastPlayer
+        )
 
         // ── 统一的「用主控墩」决策（Trump Control）──────────────────────
         // 吊主跟牌 / 绝门将吃 / 盖吃对手将牌 / 帮队友锁定 / 抢回出牌权——
@@ -2382,8 +2438,8 @@ struct AIPlayer {
             score += trickSecureBefore ? Double(playedPoints) * 4 : -Double(playedPoints) * 8
             score += clearsSuit ? 8 : 0
             if candidateWins && !usesTrump { score -= 30 }   // 非主盖队友：罚（主牌盖队友由模型判断）
-            score -= breakPenalty * 18
-            score -= strongBreakPenalty * 24
+            score -= breakPenalty * 18 * preservationDamp
+            score -= strongBreakPenalty * 24 * preservationDamp
             if playedPoints == 0 { score += 4 }
             if !trickSecureBefore && move.kind == .followSupport {
                 score -= trickPoints >= 15 ? 80 : 35
@@ -2408,8 +2464,8 @@ struct AIPlayer {
                 )
             }
             score += clearsSuit ? 5 : 0
-            score -= breakPenalty * 16
-            score -= strongBreakPenalty * 22
+            score -= breakPenalty * 16 * preservationDamp
+            score -= strongBreakPenalty * 22 * preservationDamp
         }
 
         switch move.kind {
@@ -2473,7 +2529,10 @@ struct AIPlayer {
         let currentWinner = evaluator.winner(of: state.currentTrick)
         let partnerWinning = currentWinner.team == position.team
         let trickPoints = state.currentTrick.plays.flatMap { $0.cards }.reduce(0) { $0 + $1.pointValue }
-        let pts = Double(trickPoints)
+        let playedPoints = move.cards.reduce(0) { $0 + $1.pointValue }
+        let totalPoints = trickPoints + playedPoints
+        let pts = Double(totalPoints)
+        let pressure = pointPressureBonus(totalPoints: totalPoints)
         let leadIsTrump = evaluator.dominantSuit(of: leadCards) == nil
         // 拿墩安全分级：A=finalWin（终局也能赢）、B=temporaryWin（暂赢、后手或可盖）、C=cannotWin（赢不了）
         let winClass = classifyFollowMove(
@@ -2484,7 +2543,7 @@ struct AIPlayer {
         )
         let cost = trumpControlCost(move.cards, ts: ts, tr: tr)
         // 主牌成本权重：墩分越高越不该让“惜主”主导（高分/高价值时弱化成本）
-        let costDamp = trumpCostDamping(trickPoints: trickPoints)
+        let costDamp = trumpCostDamping(trickPoints: totalPoints)
         // 抢回出牌权的价值：赢下后手上还有多少可兑现的资产（旁门A、对子/连对、甩牌、长门…）
         let leadControl = trumpLeadControlValue(move: move, hand: hand, position: position, state: state, ctx: ctx)
 
@@ -2502,10 +2561,10 @@ struct AIPlayer {
                 switch winClass {
                 case .finalWin:
                     classification = .secureWinner
-                    score += 40 + pts * 4 - cost * costDamp
+                    score += 30 + pts * 5.5 * pressure - cost * costDamp
                 case .temporaryWin:
                     classification = .contestingTrump
-                    score += trickPoints >= 10 ? 12 + pts : -8
+                    score += totalPoints >= 10 ? 10 + pts * 2.2 * pressure : -8
                 case .cannotWin:
                     classification = .passiveTrump
                     score += 0
@@ -2519,19 +2578,20 @@ struct AIPlayer {
             switch winClass {
             case .finalWin:                       // A：能锁定终局
                 classification = .secureWinner
-                score += 40 + pts * 6 - cost * costDamp + leadControl
+                score += 32 + Double(2 * trickPoints + playedPoints) * 5.2 * pressure - cost * costDamp + leadControl
             case .temporaryWin:                   // B：争墩 / 逼对手出更高主
                 classification = .contestingTrump
                 let contest: Double
-                if trickPoints >= 10 { contest = 50 + pts * 4 }
-                else if trickPoints >= 5 { contest = 28 + pts * 3 }
+                if totalPoints >= 15 { contest = 54 + Double(2 * trickPoints + playedPoints) * 3.2 * pressure }
+                else if totalPoints >= 10 { contest = 40 + Double(2 * trickPoints + playedPoints) * 2.4 * pressure }
+                else if totalPoints >= 5 { contest = 24 + Double(2 * trickPoints + playedPoints) * 1.8 }
                 else { contest = ctx.isLastPlayer ? 6 : -12 }   // 无分/低分争墩意义有限
                 score += contest - cost * costDamp + leadControl * 0.6
             case .cannotWin:                      // C：被动主牌（赢不了）
                 classification = .passiveTrump
                 if leadIsTrump {
                     // 跟主吊：可能只有小主、被迫跟；按墩分阶梯（15+ 由 filterTrumpPullPointContest 直接剔除）
-                    score += passiveTrumpPenalty(trickPoints)
+                    score += passiveTrumpPenalty(totalPoints)
                 } else {
                     // 绝门却扔个赢不了的主：纯浪费（本可垫副牌）→ 重罚
                     score -= 25 + pts * 5
@@ -2560,6 +2620,8 @@ struct AIPlayer {
 
     /// 墩分越高，越不让“惜主成本”主导决策。
     private static func trumpCostDamping(trickPoints: Int) -> Double {
+        if trickPoints >= 25 { return 0.15 }
+        if trickPoints >= 20 { return 0.22 }
         if trickPoints >= 15 { return 0.3 }
         if trickPoints >= 10 { return 0.5 }
         if trickPoints >= 5  { return 0.8 }
@@ -2781,7 +2843,7 @@ struct AIPlayer {
         let ownPoints = candidate.cards.reduce(0) { $0 + $1.pointValue }
         let remainingHand = handAfterPlaying(candidate.cards, from: hand)
         let capturedPoints = myTeamWon ? Double(points) : -Double(points)
-        let wonTrickValue = winner == position ? 1.0 : (myTeamWon ? 0.5 : -1.0)
+        let wonTrickValue = winner == position ? 1.0 : (myTeamWon ? 0.35 : -0.6)
         let simContext = AIContext.build(state: state, ts: state.trumpSuit, tr: state.trumpRank)
         let initiative = initiativeNeed(position: position, hand: remainingHand, state: state, ctx: simContext)
         let assetValue = remainingAssetValue(position: position, hand: remainingHand, state: state, ctx: simContext)
@@ -2791,25 +2853,27 @@ struct AIPlayer {
             hand: hand,
             move: candidate
         )
+        let pressure = pointPressureBonus(totalPoints: points)
+        let preservationDamp = pointPressureDamping(totalPoints: points)
 
-        var score = capturedPoints * 2
-            + wonTrickValue * 2
-            + assetValue
-            + (myTeamWon ? initiative * 0.3 : -initiative * 0.25)
-            - earlyTrumpPenalty * 3
+        var score = capturedPoints * 8 * pressure
+            + wonTrickValue * (points > 0 ? 1.0 : 0.6)
+            + assetValue * preservationDamp
+            + (myTeamWon ? initiative * 0.12 : -initiative * 0.18)
+            - earlyTrumpPenalty * 3 * preservationDamp
 
-        if !myTeamWon && ownPoints > 0 { score -= Double(ownPoints) * 0.5 }
-        if myTeamWon && candidate.cards.allSatisfy({ $0.pointValue == 0 }) { score += 0.5 }
+        if !myTeamWon && ownPoints > 0 { score -= Double(ownPoints) * 3.0 * pressure }
+        if myTeamWon && candidate.cards.allSatisfy({ $0.pointValue == 0 }) && points == 0 { score += 0.2 }
         // 先手拆强对子：在模拟评估中也明确惩罚，抵消「保留单张大牌」带来的 assetValue 偏好。
         // 仅限先手（本墩尚无人出牌）；甩牌豁免（已验证为更高价值牌型）。跟牌不受此罚影响。
         if candidate.kind != .slam, state.currentTrick.plays.isEmpty {
             score -= strongPairBreakLeadPenalty(
                 cards: candidate.cards, hand: hand, ts: state.trumpSuit, tr: state.trumpRank
-            ) * 0.05
+            ) * 0.05 * preservationDamp
             score += tractorFirstLeadBonus(cards: candidate.cards, ts: state.trumpSuit, tr: state.trumpRank) * 0.25
             score -= tractorBreakLeadPenalty(
                 cards: candidate.cards, hand: hand, ts: state.trumpSuit, tr: state.trumpRank
-            ) * 0.25
+            ) * 0.25 * preservationDamp
             score += absoluteSideWinnerLeadBonus(
                 cards: candidate.cards,
                 hand: hand,
@@ -2823,7 +2887,7 @@ struct AIPlayer {
                 hand: hand,
                 state: state,
                 ctx: simContext
-            ) * 0.25
+            ) * 0.25 * preservationDamp
             score += pairFirstLeadBonus(cards: candidate.cards, ts: state.trumpSuit, tr: state.trumpRank) * 0.25
             score -= pairFirstSingleLeadPenalty(
                 move: candidate,
@@ -2833,7 +2897,7 @@ struct AIPlayer {
                 tr: state.trumpRank,
                 clearBenefit: 0,
                 partnerDump: 0
-            ) * 0.25
+            ) * 0.25 * preservationDamp
         }
         return score
     }
@@ -4065,13 +4129,54 @@ struct AIPlayer {
         trickPoints: Int,
         playedPoints: Int
     ) -> Double {
+        let totalPoints = trickPoints + playedPoints
+        let pressure = pointPressureBonus(totalPoints: totalPoints)
         switch winClass {
         case .finalWin:
-            return 90 + Double(trickPoints) * 5 + Double(playedPoints)
+            return 26 + Double(2 * trickPoints + playedPoints) * 3.2 * pressure
         case .temporaryWin:
-            return 20 + Double(trickPoints) * 1.2 - Double(playedPoints) * 2
+            return 8 + Double(trickPoints) * 1.6 * pressure - Double(playedPoints) * 3
         case .cannotWin:
-            return -Double(playedPoints) * 4
+            return -Double(playedPoints) * 7 * pressure
+        }
+    }
+
+    private static func followPointSwingScore(
+        winClass: FollowWinClass,
+        partnerWinningBefore: Bool,
+        trickSecureBefore: Bool,
+        trickSecureAfter: Bool,
+        trickPoints: Int,
+        playedPoints: Int,
+        isLastPlayer: Bool
+    ) -> Double {
+        let totalPoints = trickPoints + playedPoints
+        guard totalPoints > 0 else { return 0 }
+        let pressure = pointPressureBonus(totalPoints: totalPoints)
+
+        if partnerWinningBefore {
+            if trickSecureBefore {
+                return Double(playedPoints) * 5.5 * pressure
+            }
+            if trickSecureAfter || winClass == .finalWin {
+                return Double(totalPoints) * 5.0 * pressure + Double(trickPoints) * 1.5
+            }
+            if winClass == .temporaryWin {
+                let unsafePenalty = isLastPlayer ? 0.0 : Double(totalPoints) * 1.8
+                return Double(totalPoints) * 2.0 * pressure - unsafePenalty
+            }
+            return -Double(playedPoints) * 8.0 * pressure - Double(trickPoints) * 1.5
+        }
+
+        switch winClass {
+        case .finalWin:
+            // Taking points also denies the points the opponents were about to win.
+            return Double(2 * trickPoints + playedPoints) * 5.5 * pressure
+        case .temporaryWin:
+            let exposurePenalty = isLastPlayer ? 0.0 : Double(totalPoints) * 2.5
+            return Double(2 * trickPoints + playedPoints) * 2.0 * pressure - exposurePenalty
+        case .cannotWin:
+            return -Double(playedPoints) * 8.0 * pressure
         }
     }
 
