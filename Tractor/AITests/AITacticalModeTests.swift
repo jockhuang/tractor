@@ -177,4 +177,45 @@ final class AITacticalModeTests: XCTestCase {
         XCTAssertNil(tcLead.leadSuit)
         XCTAssertEqual(tcLead.trickPoints, 0)
     }
+
+    /// A completed trick where East (opponent) shows void in hearts — sets up "the ♥ winner would be ruffed".
+    private func eastVoidHeartsTrick() -> Trick {
+        var t = Trick(leadPosition: .north)
+        t.plays.append((position: .north, cards: [c(.hearts, .five)]))
+        t.plays.append((position: .east, cards: [c(.clubs, .three)]))   // East discards ♣ -> void in ♥
+        t.plays.append((position: .south, cards: [c(.hearts, .six)]))
+        t.plays.append((position: .west, cards: [c(.hearts, .eight)]))
+        return t
+    }
+
+    // Asset Lifecycle: a side winner would be ruffed now but we have trump control -> pull first, realize later (no blind cash / fire-sale).
+    func testAssetLifecyclePullsTrumpBeforeRuffThreatenedWinner() {
+        // South leads; East void in ♥ (leading ♥A would be ruffed); South has trump control (♠A♠K♠Q♠J) -> pull trump, not cash ♥A.
+        let s = makeState()
+        s.completedTricks = [eastVoidHeartsTrick()]
+        s.currentTrick = Trick(leadPosition: .south)
+        s.currentLeader = .south
+        s.currentTurn = .south
+        setHand(s, .south, [c(.hearts, .ace), c(.spades, .ace), c(.spades, .king),
+                            c(.spades, .queen), c(.spades, .jack), c(.clubs, .four)])
+        let chosen = AIPlayer.chooseCards(position: .south, state: s, evaluator: eval)
+        XCTAssertEqual(chosen.count, 1)
+        XCTAssertTrue(CardComparator.isTrump(chosen[0], trumpSuit: ts, trumpRank: tr),
+                      "应先拔主，chosen=\(chosen.map { $0.shortDisplay })")
+        XCTAssertFalse(chosen[0].suit == .hearts && chosen[0].rank == .ace,
+                       "不应现在兑现会被将吃的♥A")
+    }
+
+    // Contrast: no ruff threat -> ♥A is a clean winner and should be cashed (asset still in its high-realization phase).
+    func testAssetLifecycleCashesWinnerWhenNoRuffThreat() {
+        let s = makeState()
+        s.currentTrick = Trick(leadPosition: .south)
+        s.currentLeader = .south
+        s.currentTurn = .south
+        setHand(s, .south, [c(.hearts, .ace), c(.spades, .ace), c(.spades, .king),
+                            c(.spades, .queen), c(.spades, .jack), c(.clubs, .four)])
+        let chosen = AIPlayer.chooseCards(position: .south, state: s, evaluator: eval)
+        XCTAssertEqual(chosen.map { $0.shortDisplay }, ["♥A"],
+                       "无将吃威胁应直接兑现♥A，chosen=\(chosen.map { $0.shortDisplay })")
+    }
 }

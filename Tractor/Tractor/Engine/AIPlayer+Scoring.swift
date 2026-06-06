@@ -1117,6 +1117,71 @@ extension AIPlayer {
     }
 
 
+    // MARK: - Asset Lifecycle (side-suit winners can depreciate then appreciate again)
+    //
+    // A side-suit winner's value is dynamic (card strength / control probability /
+    // ruff risk / future realization potential): when an opponent is void in the suit
+    // and may still hold trump, cashing it now gets ruffed -> current realization value
+    // drops (depreciates); if we have enough trump control to pull the opponents' trumps,
+    // then after pulling it becomes an absolute winner again (appreciates).
+    // So for such assets prefer "pull trump first, realize later" over blindly cashing.
+
+    /// Whether any unknown trumps (possibly in opponents' hands) remain — used to judge
+    /// whether pulling trump is still meaningful.
+    static func unknownEnemyTrumpsRemain(hand: [Card], ts: Suit?, tr: Rank, ctx: AIContext) -> Bool {
+        let total = Deck.doubleDeck().filter { CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr) }.count
+        let known = ctx.playedCards.filter { CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr) }.count
+            + hand.filter { CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr) }.count
+        return total - known > 0
+    }
+
+    /// Whether a side suit is currently "awaiting trump pull": an opponent is void in it
+    /// and may still hold trump (cashing now would be ruffed), and we have trump control
+    /// with pullable opponent trumps remaining -> the suit's winners re-appreciate after pulling.
+    static func suitAwaitingTrumpPull(
+        _ suit: Suit, position: PlayerPosition, hand: [Card], state: GameState, ctx: AIContext
+    ) -> Bool {
+        let ts = state.trumpSuit
+        let tr = state.trumpRank
+        guard ownTrumpControlFactor(in: hand, ts: ts, tr: tr) > 0 else { return false }
+        let ruffers = ctx.voidEnemies(myTeam: position.team, key: suit.rawValue)
+            .filter { !ctx.isVoid($0, key: "TRUMP") }
+        guard !ruffers.isEmpty else { return false }
+        return unknownEnemyTrumpsRemain(hand: hand, ts: ts, tr: tr, ctx: ctx)
+    }
+
+    /// Value of the winner assets we hold in a side suit (A / current top single / strongest protectable pair).
+    static func heldSideWinnerValue(in hand: [Card], suit: Suit, ts: Suit?, tr: Rank, ctx: AIContext) -> Int {
+        let suitCards = hand.filter {
+            $0.suit == suit && !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
+        }
+        guard !suitCards.isEmpty else { return 0 }
+        var value = strongestProtectableSidePairValue(in: hand, suit: suit, ts: ts, tr: tr)
+        for card in suitCards where card.rank == .ace || ctx.isEffectivelyBiggest(card, ts: ts, tr: tr) {
+            value = max(value, card.rank == .ace ? 40 : 30)
+        }
+        return value
+    }
+
+    /// "Delayed realization" asset value: we hold side-suit winners that would be ruffed now,
+    /// but have trump control to pull. After pulling they re-appreciate. > 0 means prefer
+    /// pulling trump first and delaying realization.
+    static func delayedSideRealizationValue(
+        position: PlayerPosition, hand: [Card], state: GameState, ctx: AIContext
+    ) -> Double {
+        let ts = state.trumpSuit
+        let tr = state.trumpRank
+        let control = ownTrumpControlFactor(in: hand, ts: ts, tr: tr)
+        guard control > 0 else { return 0 }
+        var best = 0.0
+        for suit in Suit.allCases
+            where suitAwaitingTrumpPull(suit, position: position, hand: hand, state: state, ctx: ctx) {
+            best = max(best, Double(heldSideWinnerValue(in: hand, suit: suit, ts: ts, tr: tr, ctx: ctx)) * control)
+        }
+        return best
+    }
+
+
     static func trumpThreatScore(
         from voidEnemies: [PlayerPosition],
         hand: [Card],

@@ -171,6 +171,43 @@ do {
           "Test7 TrickContext 空墩(我方先手)派生量正确")
 }
 
+// ── Test 8: Asset Lifecycle — a side winner ruffed now but with trump control → pull first, realize later ──
+func eastVoidHeartsTrick() -> Trick {
+    var t = Trick(leadPosition: .north)
+    t.plays.append((position: .north, cards: [c(.hearts, .five)]))
+    t.plays.append((position: .east, cards: [c(.clubs, .three)]))   // East discards ♣ -> void in ♥
+    t.plays.append((position: .south, cards: [c(.hearts, .six)]))
+    t.plays.append((position: .west, cards: [c(.hearts, .eight)]))
+    return t
+}
+do {
+    let s = makeState(trump: ts, rank: tr)
+    s.completedTricks = [eastVoidHeartsTrick()]
+    s.currentTrick = Trick(leadPosition: .south)
+    s.currentLeader = .south
+    s.currentTurn = .south
+    s.players[PlayerPosition.south.rawValue].hand =
+        [c(.hearts, .ace), c(.spades, .ace), c(.spades, .king),
+         c(.spades, .queen), c(.spades, .jack), c(.clubs, .four)]
+    let chosen = AIPlayer.chooseCards(position: .south, state: s, evaluator: eval)
+    let isTrump = chosen.count == 1 && CardComparator.isTrump(chosen[0], trumpSuit: ts, trumpRank: tr)
+    let notHeartAce = !(chosen.first?.suit == .hearts && chosen.first?.rank == .ace)
+    check(isTrump && notHeartAce, "Test8 会被将吃的♥A → 先拔主(不盲目兑现)",
+          "chosen=\(chosen.map { $0.shortDisplay })")
+
+    // Contrast: no ruff threat -> cash ♥A directly
+    let s2 = makeState(trump: ts, rank: tr)
+    s2.currentTrick = Trick(leadPosition: .south)
+    s2.currentLeader = .south
+    s2.currentTurn = .south
+    s2.players[PlayerPosition.south.rawValue].hand =
+        [c(.hearts, .ace), c(.spades, .ace), c(.spades, .king),
+         c(.spades, .queen), c(.spades, .jack), c(.clubs, .four)]
+    let chosen2 = AIPlayer.chooseCards(position: .south, state: s2, evaluator: eval)
+    check(chosen2.map { $0.shortDisplay } == ["♥A"], "Test8 无威胁 → 直接兑现♥A",
+          "chosen=\(chosen2.map { $0.shortDisplay })")
+}
+
 print(String(repeating: "─", count: 40))
 if failures.isEmpty {
     print("ALL TESTS PASSED ✅")

@@ -188,8 +188,11 @@ extension AIPlayer {
         let tr = state.trumpRank
         let myTeam = position.team
         let safeGroups = findSlamLeadCandidates(in: hand, ts: ts, tr: tr, myTeam: myTeam, ctx: ctx)
+        // Asset Lifecycle: when a side suit would be ruffed now but re-appreciates after
+        // pulling trump, do not treat it as an immediate Tier 1 cashing asset (delay, pull first).
         let cashingGroups = safeGroups.filter {
             isTimeSensitiveSideControlGroup($0, hand: hand, ts: ts, tr: tr, ctx: ctx)
+                && !moveSuitAwaitingTrumpPull($0, position: position, hand: hand, state: state, ctx: ctx)
         }
         let protectedGroups = cashingGroups + safeGroups
 
@@ -205,7 +208,8 @@ extension AIPlayer {
             ))
         }
         for move in findAbsoluteSideWinnerLeadCandidates(in: hand, ts: ts, tr: tr, myTeam: myTeam, ctx: ctx)
-            where !isStrictSubsetOfAnyGroup(move.cards, groups: protectedGroups) {
+            where !isStrictSubsetOfAnyGroup(move.cards, groups: protectedGroups)
+                && !moveSuitAwaitingTrumpPull(move.cards, position: position, hand: hand, state: state, ctx: ctx) {
             assets.append(LeadAsset(
                 move: move,
                 tier: .cashingWinner,
@@ -355,11 +359,16 @@ extension AIPlayer {
                 + (isTractorLead(cards, ts: ts, tr: tr) ? 35 : 0)
         case .initiativeBuilder:
             let remaining = handAfterPlaying(cards, from: hand)
-            return 120
+            var s = 120
                 + leadInitiativeValue(hand: remaining, position: position, state: state, ctx: ctx, security: max(security, 0.55)) * 80
                 + partnerDumpLeadValue(cards, position: position, tr: tr, ctx: ctx) * 35
                 + idleTrumpTransferValue(move, hand: hand, ts: ts, tr: tr)
                 - points * 2
+            // Asset Lifecycle: pull trump to unlock side-suit winners awaiting it (pull first, realize later).
+            if isTrumpLead(move, ts: ts, tr: tr) {
+                s += delayedSideRealizationValue(position: position, hand: hand, state: state, ctx: ctx) * 1.2
+            }
+            return s
         case .weakDisposal:
             let breakCost = structureFragmentationCost(cards, hand: hand, ts: ts, tr: tr)
             return 40
@@ -386,6 +395,23 @@ extension AIPlayer {
             + security * 20
             + Double(cards.count) * 2
             + (clearsSideSuitForLead(cards, hand: hand, ts: ts, tr: tr) ? 4 : 0)
+    }
+
+
+    /// Whether the side suit of this move is "awaiting trump pull" (ruffed if led now, re-appreciates after pulling).
+    static func moveSuitAwaitingTrumpPull(
+        _ cards: [Card],
+        position: PlayerPosition,
+        hand: [Card],
+        state: GameState,
+        ctx: AIContext
+    ) -> Bool {
+        let ts = state.trumpSuit
+        let tr = state.trumpRank
+        guard let first = cards.first,
+              !CardComparator.isTrump(first, trumpSuit: ts, trumpRank: tr),
+              let suit = first.suit else { return false }
+        return suitAwaitingTrumpPull(suit, position: position, hand: hand, state: state, ctx: ctx)
     }
 
 
@@ -783,7 +809,12 @@ extension AIPlayer {
         if strongTrumpCount(in: hand, ts: ts, tr: tr) >= 4 { return true }
         if sideCardsRemaining(in: hand, ts: ts, tr: tr) <= trumpCount { return true }
         if exposedPointCardsToProtect(in: hand, ts: ts, tr: tr) >= 25 { return true }
-        if sidePairProtectionValue(position: position, hand: hand, state: state, ctx: AIContext.build(state: state, ts: ts, tr: tr)) >= 45 {
+        let leadCtx = AIContext.build(state: state, ts: ts, tr: tr)
+        if sidePairProtectionValue(position: position, hand: hand, state: state, ctx: leadCtx) >= 45 {
+            return true
+        }
+        // Asset Lifecycle: allow leading trump to pull when holding side-suit winners awaiting it.
+        if delayedSideRealizationValue(position: position, hand: hand, state: state, ctx: leadCtx) >= 30 {
             return true
         }
         if state.dealerTeamIdx == position.team && trumpCount >= 6 { return true }
