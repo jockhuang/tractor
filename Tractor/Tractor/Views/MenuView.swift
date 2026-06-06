@@ -102,7 +102,7 @@ struct MenuView: View {
             VStack {
                 Spacer()
                 HStack {
-                    Text("版本 1.1  ·  南北 vs 东西")
+                    Text("版本 1.2  ·  南北 vs 东西")
                         .font(.caption)
                         .foregroundColor(.white.opacity(0.4))
 
