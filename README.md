@@ -392,9 +392,12 @@ Triggered when the current trick already has ≥ 10 points **and** the attacking
 
 `smartDiscard` adds context on top of `discardOrder`:
 
-- If the opponent is currently winning, point value is the first priority. The AI should not add off-suit points to an enemy trick when any 0-point fill is available.
+- If the opponent is currently winning, cards are sorted by `discardCost`, not raw point value. The cost combines immediate point risk, future point realization, future loss risk, control-asset value, and structure integrity.
+- Control assets such as jokers, rank cards, big trumps, strong trump pairs, tractor cores, AKK / AAKK cores, side Aces, and known-big side structures are protected above isolated 5 / 10 / K cards.
+- Point-card protection is conditional. Isolated point cards can be discarded when their future loss risk is high and the current discard does not cross a critical attacking score line. If discarding points would let the attacking team reach a 40-point threshold, point protection is temporarily raised.
+- Free off-suit fill cards still prefer 0-point cards when the opponent is winning; forced same-suit point cards are governed by follow-suit legality.
 - If the partner is winning and the trick is secure, high-point support cards may be played first.
-- Pair preservation is secondary to point denial when the opponent is winning; breaking a 0-point pair is preferable to dumping an avoidable 10-point card.
+- Pair preservation is secondary to point denial when the opponent is winning, but control structures should not be broken just to preserve an isolated point card outside a critical score line.
 
 ### Support Card Priority — `partnerSupportOrder`
 
