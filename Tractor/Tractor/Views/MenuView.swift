@@ -6,6 +6,9 @@ struct MenuView: View {
     @State private var showRules = false
     @State private var showLobby = false
     @State private var soundEnabled = SoundManager.shared.soundEnabled
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "未知"
+    }
 
     var body: some View {
         ZStack {
@@ -103,7 +106,7 @@ struct MenuView: View {
             VStack {
                 Spacer()
                 HStack {
-                    Text("版本 1.2  ·  南北 vs 东西")
+                    Text("版本 \(appVersion)  ·  南北 vs 东西")
                         .font(.caption)
                         .foregroundColor(.white.opacity(0.4))
 
