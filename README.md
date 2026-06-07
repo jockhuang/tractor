@@ -188,8 +188,8 @@ Do not add conditions such as `roundNumber > N`. Every defending-side win must s
 
 The AI no longer follows a single fixed priority list. Every decision (lead or follow) runs the same three-stage pipeline:
 
-1. **Generate candidates** — several generators each propose plausible moves (`AIMove` = cards + a `MoveKind` tag). A rule-based baseline move is always included so there is a sensible fallback.
-2. **Score heuristically** — `scoreLead` / `scoreFollow` assign each candidate a numeric score; candidates are sorted best-first and (for leads) filtered for legality/policy.
+1. **Generate candidates** — several generators each propose plausible moves (`AIMove` = cards + a `MoveKind` tag). Follow decisions include a rule-based baseline; lead decisions use asset tiers plus weak-disposal fallbacks.
+2. **Score heuristically** — leads use `leadAssetScore` inside the selected asset tier; follows use `scoreFollow`. Candidates are sorted best-first and filtered for legality/policy.
 3. **Monte Carlo rollout** — the top `monteCarloTopMoveCount` (= 5) candidates are each simulated `monteCarloSimulationCount` (= 24) times against sampled hidden hands; the move with the best blended score (rollout average + heuristic × 0.03) is played.
 
 If `chooseCards` is called with an empty current trick it leads; otherwise it follows. Forced-follow cards (from a failed enemy slam) bypass the pipeline and go straight to the rule-based path.
@@ -204,72 +204,62 @@ Built once per decision from `completedTricks` + the current trick. It tracks:
 
 Derived helpers: `isEffectivelyBiggest` (all higher same-suit cards are exhausted in the double deck), `manyBigTrumpsRemain`, `unplayedSuitPoints`, `allEnemiesVoid` / `voidEnemies`.
 
-### Lead Candidate Generators — `leadCards`
+### Lead Asset Tiers — `leadCards`
 
-Lead candidates are generated and planned in this order before heuristic scoring:
+Lead decisions are grouped into `LeadAsset` records and selected by `LeadAssetTier`. The AI first chooses the highest-priority tier that currently exists, then ranks only moves inside that tier with `leadAssetScore` and Monte Carlo. This prevents unrelated local bonuses from making weak pairs, trump transfers, or ordinary disposals outrank cashable winners.
 
-1. Safe slam leads.
-2. Absolute side winners: side-suit Ace, known highest side single, known highest side pair.
-3. Legal tractors.
-4. Strong pairs.
-5. Normal pairs.
-6. Long-suit / strategic plans: partner dump, no-trump control, trump lead candidates.
-7. Trump transfer leads.
-8. Weak cards.
+Asset tiers:
+
+1. **Cashing Time-Sensitive Winners** — side-suit Aces, known highest side singles, known highest side pairs, and safe side control groups. These can decay as opponents become void, so they are cashed early.
+2. **Safe Slam / Control Groups** — safe slams and whole control groups, evaluated as complete groups. AKK / AAKK-style groups suppress their component moves.
+3. **Strong Structures** — tractors, level pairs, joker pairs, strong trump pairs, and strong side pairs. These are stable control assets, but the largest trump pairs are protected from early leads.
+4. **Initiative Building** — partner-dump plans, long-suit development, controlled trump leads, and low-cost trump transfers.
+5. **Weak Disposal** — weak singles and weak pairs, only when no higher-value asset exists.
 
 | Generator | Proposes |
 |---|---|
-| `findSlamLeadCandidates` | Unbeatable slam throws (see below). |
-| `findAbsoluteSideWinnerLeadCandidates` | Time-sensitive side winners: side Ace singleton, known highest side single, known highest side pair. |
-| `findTractorLeadCandidates` | Legal tractors across logical suits, including trump/no-trump structures when legal and not walking into known void enemies. |
-| `findStrongPairLeadCandidates` | Strong pairs such as Ace/rank/joker pairs, trump strong pairs, K/10 pairs, and point pairs. |
-| `findPairFirstLeadCandidates` | All pair assets, including ordinary pairs, so they are considered as structures rather than lost to weak single leads. |
-| `findPartnerDumpLeadCandidates` | Suits the partner is void in that still hold unplayed points — lead them so the partner can dump points to us. |
-| `findNoTrumpControlLeadCandidates` | In no-trump rounds, joker/rank/Ace control pairs and tractors. |
-| `findTrumpLeadCandidates` | Weak trump singles; a strong *safe* trump when on the dealer team or holding ≥ 6 trumps; the weakest trump pair. |
-| `findTrumpTransferLeadCandidates` | A single low-cost, structure-safe small trump (kept as a candidate; valued via the Initiative/Point-Protection concepts). Only when trumps are sufficient. |
-| `findWeakLeadCandidates` | Weakest leadable single (always-available fallback). |
-| `leadCardsRuleBased` | The legacy ordered heuristic (below), added as one extra candidate. |
+| `buildLeadAssets` | Collects all lead assets, deduplicates them, and keeps the strongest tier for each card set. |
+| `findSlamLeadCandidates` | Unbeatable slams / control groups; safe groups suppress their component plays. |
+| `findAbsoluteSideWinnerLeadCandidates` | Time-sensitive side winners: side Ace, known highest side single, known highest side pair. |
+| `findTractorLeadCandidates` | Legal tractors across logical suits, skipping side suits where all enemies are known void. |
+| `findStrongPairLeadCandidates` | Strong structures: Ace / level / joker pairs, strong trump pairs, K/10 pairs, and point pairs. |
+| `findNoTrumpControlLeadCandidates` | No-trump joker / level / Ace control pairs and tractors. |
+| `findPartnerDumpLeadCandidates` | Suits the partner is void in that still contain unplayed points. |
+| `findLongSuitDevelopmentLeadCandidates` | Long-suit development when no cashing or structural asset needs action. |
+| `findTrumpLeadCandidates` / `findTrumpTransferLeadCandidates` | Controlled trump leads and low-cost trump transfers; trump transfers require at least 3 trumps and must not break structure. |
+| `findWeakLeadCandidates` / `findWeakPairDisposalLeadCandidates` | Weak singles and low-value pair disposal. |
 
-After sorting and `filterAllowedLeadMoves`, Monte Carlo Top-N is widened to forcibly keep important classes:
+`selectLeadAssetPool` only lets the current best tier enter Monte Carlo. Inside Tier 4, if there is no partner-dump plan and a legal trump transfer exists, only the trump-transfer moves are simulated so the AI does not lead a random weak side card during idle turns.
 
-- Absolute side winners are kept so time-sensitive side A / highest-side winners are not displaced by ordinary pairs.
-- Legal tractors are kept so AAKK / KKQQ / QQJJ are not displaced by their component pairs.
-- Strong pairs are kept so they are not displaced by singleton control cards.
-- Ordinary pairs are kept so Pair First assets still reach simulation.
+### Lead Scoring — `leadAssetScore`
 
-### Lead Scoring — Six Strategic Concepts (`scoreLead`)
+`leadAssetScore` ranks moves within the selected tier. Cross-tier priority is handled only by `LeadAssetTier`; ties use `leadAssetTieBreakScore` based on points, security, card count, and suit-clearing.
 
-The lead path is built around six high-level concepts instead of a pile of overlapping bonuses/penalties. Each concept has one evaluator, and the readable weight table (`LeadWeight`) expresses the priority.
+Core rules:
 
-`scoreLead` is now a safety-gated weighted blend of six terms:
+- Time-sensitive side winners are cashed before they lose value to enemy voids.
+- Safe control groups are evaluated as whole plays and suppress their component moves.
+- Structure preservation is treated as a cost, not an absolute goal; it only dominates when no higher-tier asset needs to be realized.
+- Initiative-building is below real point realization and stable structures.
+- Weak disposal is the final fallback.
 
-| # | Concept | Function | Weight | Meaning |
-|---|---|---|---|---|
-| 1 | Trick Security | `leadWinProbability` | 55 | Can our team actually take this trick (0–0.95)? |
-| 6 | Point Protection | `leadPointConcept` | 40 | Team point gain (draw partner dumps) minus the risk of cheaply giving away points/lead (ruff risk, unsecured points). Acts as a safety gate. |
-| 2 | Control Asset Preservation | `controlSpendCost` | 45 | Value of control assets the move spends — jokers (1.0), level (0.8), trump Ace (0.7), side Ace (0.5), other top card (0.35). |
-| 3 | Structure Integrity | `structureFragmentationCost` + `wholeStructureControlValue` | 60 | Penalize partial use of a pair/tractor; reward leading an intact **dominant** structure. AKK is one group, AAKK one tractor. |
-| 4 | Asset Decay | `assetDecayRealization` | 25 | Reward cashing a side Ace / side top single while it can still win cleanly (no enemy void yet) — stops the AI holding side aces forever. |
-| 5 | Initiative Value | `leadInitiativeValue` | 20 | Only when the lead is securable and we hold assets worth deploying next. |
+This structure removes old special cases by construction:
 
-This single hierarchy replaces the former special cases by construction:
+- **AKK / AAKK** are evaluated as whole structures. `structureFragmentationCost` penalizes splitting them, while intact tractors/control groups receive `wholeStructureControlValue`.
+- **Splitting any pair** is one tiered cost via `pairAssetWeight` (strong/trump 0.9–1.0, K/10 0.7, point 0.6, ordinary 0.4).
+- **Holding side Aces too long** is handled by Tier 1 cashing assets rather than ad-hoc rules.
+- **Leading a beatable pair before a sure winner** is avoided because `wholeStructureControlValue` gives full credit only to dominant structures (`leadStructureDominant`).
+- **Controlled trump transfer** lives in Tier 4 and only participates when no cashing/control/strong-structure asset exists.
 
-- **AKK / AAKK** are scored as whole structures — `structureFragmentationCost` makes "lead AA out of AAKK" cost a tractor-break, while leading the intact tractor earns `wholeStructureControlValue`, so it is no longer split into AA-then-KK.
-- **Splitting any pair** is one tiered cost via `pairAssetWeight` (strong/trump 0.9–1.0, K/10 0.7, point 0.6, normal 0.4) — no longer five competing penalties.
-- **Holding side aces too long** is countered by the Asset Decay term rather than ad-hoc cashing rules.
-- **Leading a beatable pair before a sure winner** is avoided: `wholeStructureControlValue` only gives full credit to a *dominant* structure (`leadStructureDominant`, via `isEffectivelyBiggestPair` for side suits / strong trump). A non-winning pair like QQ (K/A still out) is discounted to ~30%, so cashing a sure Ace outranks leading a coin-flip pair.
-- **Controlled trump transfer** is subsumed by Initiative + Point Protection (a cheap trump that keeps the lead on our side scores well without a dedicated rule).
+Large trump pairs — joker pairs, level-rank pairs, and trump-Ace pairs — are protected by `bigTrumpPairLeadAllowed`: they are not led early just because the AI has many trumps or the pair carries points. They are actively led only in the endgame (hand count ≤ 6), or if no other legal fallback exists.
 
-A `.slam` move is exempt from the structure-fragmentation cost (a validated unbeatable throw) and gets `slamLeadValue`. No-trump rounds get higher `wholeStructureControlValue` for pairs/tractors.
+### Lead Legality Filter — `filterAllowedLeadAssets` / `allowTrumpLead`
 
-### Lead Legality Filter — `filterAllowedLeadMoves` / `allowTrumpLead`
+After asset generation, `filterAllowedLeadAssets` validates card ownership and gates trump leads with `allowTrumpLead`. Small trump transfers can pass in Tier 4. Other trump leads are generally disallowed early unless the AI is short-handed (≤ 5 tricks left), trump-rich, has more side cards than trumps, has exposed side points to protect, has a side-pair protection plan, or needs to pull trump to unlock side winners awaiting trump pull. Non-trump moves always pass.
 
-After scoring, trump leads are gated by `allowTrumpLead`: generally disallowed early unless the AI is short-handed (≤ 5 tricks left), trump-rich (≥ 8 trumps or ≥ 4 strong trumps), has more side cards than trumps, holds many exposed points to protect, or has high side-pair protection value. Non-trump moves always pass.
+### Lead Rule-based Reference — `leadCardsRuleBased`
 
-### Lead Rule-based Baseline — `leadCardsRuleBased`
-
-The legacy ordered heuristic, still generated as one candidate (and the ultimate fallback):
+The legacy ordered heuristic remains in the code as a reference / fallback implementation, but `leadCards` no longer adds it as an extra candidate. Real lead selection is driven by `buildLeadAssets` and asset tiers.
 
 0. **Slam lead** (`findSlamLead`).
 1. **Currently-biggest non-trump** — prefer a pair, else the biggest single (skip suits all enemies are void in).
@@ -304,6 +294,7 @@ Like leading, following runs candidate generation → scoring → Monte Carlo:
 
 1. A rule-based baseline (`followCardsRuleBased`) plus generated non-trump/structure candidates (`generateFollowCandidates`) plus unified trump-control candidates (`generateTrumpControlCandidates`).
 2. Keep only legal plays (`isValidPlay`), then apply:
+   - `filterUnsafeSecondHandTrumpPointExposure`: when following trump as second hand into a 0-point, unsecured trick with an unknown opponent still behind, remove point-trump candidates if a non-point legal alternative exists.
    - `filterTrumpControlMoves`: classifies every trump-spending move with the unified Trump Control Decision and, on point-heavy or high-initiative tricks, filters away passive trump plays when secure/contesting options exist.
    - `filterHighInitiativeWinningMoves`: when the AI badly needs initiative (`initiativeNeed` ≥ 100), keep only cheap, non-pair-breaking, non-big-trump winning moves if any exist; trump moves must also be non-passive and positive under Trump Control.
 3. Score with `scoreFollow`, take the top 5, and pick via Monte Carlo rollout.
@@ -345,6 +336,7 @@ This is the principled replacement for the old "play the smallest legal trump" f
 - First find cards matching the lead play's logical suit.
 - If enough same-suit cards are available: try to beat the current winning play; if unable, play the weakest same-suit cards (or support cards when partner is winning).
 - If not enough same-suit cards: play all available same-suit cards first, then fill remaining slots by strategy.
+- If the remaining same-suit cards are point cards, they may be forced by rule and must be played. Extra cards used to fill the rest of a multi-card follow are not forced; when the opponent is winning, those fill cards should prefer 0-point cards even if that means breaking a 0-point pair or ignoring an enemy-void side suit.
 
 ### Follow Sub-strategies
 
@@ -398,6 +390,12 @@ Triggered when the current trick already has ≥ 10 points **and** the attacking
 2. Within the same category: 0-point cards first, then 5-point, then 10-point.
 3. Same points: sort by rank from low to high.
 
+`smartDiscard` adds context on top of `discardOrder`:
+
+- If the opponent is currently winning, point value is the first priority. The AI should not add off-suit points to an enemy trick when any 0-point fill is available.
+- If the partner is winning and the trick is secure, high-point support cards may be played first.
+- Pair preservation is secondary to point denial when the opponent is winning; breaking a 0-point pair is preferable to dumping an avoidable 10-point card.
+
 ### Support Card Priority — `partnerSupportOrder`
 
 1. High-point cards first (10 / K / 5), then 0-point cards.
@@ -415,7 +413,7 @@ If the AI has no cards of the same logical suit, it may search the entire hand f
 Both leading and following finish by simulating the top 5 heuristic candidates:
 
 - For each candidate, run 24 simulations. Each simulation samples the three hidden hands (`sampleHiddenHands`) from the remaining double deck minus all known cards, using a deterministic seeded RNG (`MonteCarloRNG` + `monteCarloSeed`) so results are reproducible. The sampler respects each player's known voids (a player never receives a card in a logical suit they've shown void) and only treats the kitty as known when the deciding AI **is** the dealer; a non-dealer leaves the kitty in the unknown pool, but still excludes cards it can *prove* are buried (when all three opponents are void in a logical suit, every remaining card of that suit must be in the kitty).
-- `simulateCurrentTrick` plays the candidate, then lets the remaining players follow with a lightweight policy (`monteCarloFollowCards`) until the trick completes, and scores the outcome: `capturedPoints × 2 + wonTrickValue × 2 + remainingAssetValue + initiative adjustment − earlyTrumpPenalty × 3`, with small extra penalties for handing over points or rewards for winning with zero-point cards.
+- `simulateCurrentTrick` plays the candidate, then lets the remaining players follow with a lightweight policy (`monteCarloFollowCards`) until the trick completes, and scores the outcome around `capturedPoints × 8 × pointPressureBonus`, with small trick-control value, damped remaining-asset value, initiative adjustment, high-point-scene-damped trump preservation, and structure-integrity adjustments for leads. The simulation target is expected point swing, not empty trick count.
 - Final pick = average rollout score + heuristic score × 0.03 (the heuristic acts as a light tie-breaker). Constants live in `monteCarloTopMoveCount` and `monteCarloSimulationCount`.
 
 ---
@@ -502,18 +500,21 @@ Attacking side scores < 80 → defending side wins:
 | Modify slam penalty calculation | `TrickEvaluator.slamPenaltyPoints` |
 | Modify slam forced-follow logic | `GameEngine.analyzeSlamLead` |
 | Modify trick winner evaluation | `TrickEvaluator.beatsPlay` / `winner` |
-| Modify AI lead strategy | `AIPlayer.leadCards` (candidates) / `scoreLead` (weights) / `leadCardsRuleBased` (baseline) |
-| Tune AI lead scoring weights / priority | `AIPlayer.LeadWeight` (the six concept weights) |
-| Tune a single lead concept | `leadWinProbability` (security) · `leadPointConcept` (points) · `controlSpendCost` (control) · `structureFragmentationCost` + `wholeStructureControlValue` + `pairAssetWeight` (structure) · `assetDecayRealization` (decay) · `leadInitiativeValue` (initiative) |
-| Tune pair-break / structure penalties | `AIPlayer.structureBreakPenalty` / `strongStructureBreakPenalty` (and their multipliers in `scoreLead` / `scoreFollow`) |
+| Modify AI lead strategy | `AIPlayer.leadCards` / `buildLeadAssets` / `selectLeadAssetPool` |
+| Tune AI lead scoring weights / priority | `AIPlayer.leadAssetScore` / `LeadAssetTier` |
+| Tune a single lead concept | `findAbsoluteSideWinnerLeadCandidates` (cashing winners) · `findSlamLeadCandidates` (safe control groups) · `findTractorLeadCandidates` / `findStrongPairLeadCandidates` (strong structures) · `findTrumpTransferLeadCandidates` / `findLongSuitDevelopmentLeadCandidates` (initiative building) |
+| Protect or allow early high trump-pair leads | `AIPlayer.bigTrumpPairLeadAllowed` |
+| Tune pair-break / structure penalties | `AIPlayer.structureBreakPenalty` / `strongStructureBreakPenalty` (follow) and `structureFragmentationCost` / `mixedSlamFragmentationCost` (lead asset integrity) |
 | Modify AI Monte Carlo rollout | `AIPlayer.monteCarloBestMove` / `simulateCurrentTrick` / `monteCarloTopMoveCount` / `monteCarloSimulationCount` |
 | Modify AI slam lead conditions | `AIPlayer.findSlamLead` / `isEffectivelyBiggestSingle` / `isEffectivelyBiggestPair` |
 | Modify AI follow strategy | `AIPlayer.followCards` (candidates) / `scoreFollow` (weights) / `followTractor` / `followPair` |
 | Tune AI follow scoring weights | `AIPlayer.scoreFollow`; trump-spending moves should be tuned through `trumpControlDecision` / `trumpControlCost` / `trumpCostDamping` |
 | Modify AI trump-control follow logic | `AIPlayer.generateTrumpControlCandidates` / `filterTrumpControlMoves` / `trumpControlDecision` / `bestTrumpControlFill` / `isSecureWinningTrumpFollow` |
+| Modify second-hand trump point-exposure filter | `AIPlayer.filterUnsafeSecondHandTrumpPointExposure` |
+| Modify AI void-fill / discard behavior | `AIPlayer.voidFillCards` / `bestTrumpControlFill` / `smartDiscard` |
 | Modify AI safe trump logic | `AIPlayer.isSafeTrumpFiller` / `isSafeTrump` |
 | Modify AI aggressive mode threshold | `AIPlayer.followCards` (`trickPoints` / `attackScore` check) |
-| Modify discard / support-card logic | `AIPlayer.discardOrder` / `partnerSupportOrder` |
+| Modify discard / support-card ordering | `AIPlayer.smartDiscard` / `discardOrder` / `partnerSupportOrder` |
 | Modify trump strength order | `CardComparator.trumpWeight` |
 | Modify level-up score thresholds | `GameEngine.resolveRound` |
 | Modify AI trump declaration restrictions | `GameEngine.aiConsiderDeclaration` |

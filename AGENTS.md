@@ -138,7 +138,7 @@ AI 的首要目标是最终得分结果，而不是单纯赢墩数量或保留�
 
 AI 已不再走单一固定优先级表。无论先手还是跟牌，都走同一套三段式流程：
 
-1. **生成候选**：多个生成器各自提出合理走法（`AIMove` = 牌 + `MoveKind` 标签）；并始终加入一个规则基线走法作兜底。
+1. **生成候选**：多个生成器各自提出合理走法（`AIMove` = 牌 + `MoveKind` 标签）；跟牌始终加入规则基线走法作兜底，先手由资产分层和弱处置兜底负责。
 2. **启发式打分**：先手用 `leadAssetScore` 在当前资产层内部排序；跟牌用 `scoreFollow` 给候选打分。
 3. **蒙特卡洛模拟**：取分数最高的前 `monteCarloTopMoveCount`（=5）个候选，各模拟 `monteCarloSimulationCount`（=24）次对未知手牌的随机抽样对局，选综合分（模拟均分 + 启发式分 × 0.03）最高者出牌。
 
@@ -172,14 +172,19 @@ AI 已不再走单一固定优先级表。无论先手还是跟牌，都走同�
 | `findSlamLeadCandidates` | 无法被压制的甩牌 / 控制组；安全组合会压制其子走法 |
 | `findAbsoluteSideWinnerLeadCandidates` | 时效性副牌赢家：旁门 A、已知最大副牌单张、已知最大副牌对子；若属于安全控制组则不单独出 |
 | `findTractorLeadCandidates` | 强结构层候选：所有逻辑花色中的合法拖拉机，跳过敌方已全绝的副花色 |
-| `findStrongPairLeadCandidates` | 强结构层候选：A/级牌/王对子、强主对、K/10 对、分牌对子 |
-| `findNoTrumpControlLeadCandidates` | 无主局中的王/级牌/A 控制对子与连对 |
+| `findStrongPairLeadCandidates` | 强结构层候选：A/级牌/王对子、强主对、K/10 对、分牌对子；大主对子会先过 `bigTrumpPairLeadAllowed` 保护 |
+| `findNoTrumpControlLeadCandidates` | 无主局中的王/级牌/A 控制对子与连对；大主控制对子同样会先过 `bigTrumpPairLeadAllowed` |
 | `findPartnerDumpLeadCandidates` | 主动权建设：队友已绝且仍有未出分牌的花色——领出让队友垫分 |
 | `findLongSuitDevelopmentLeadCandidates` | 主动权建设：无兑现资产时发展长门 |
 | `findTrumpLeadCandidates` / `findTrumpTransferLeadCandidates` | 主动权建设：受控吊主或低成本小主过渡；主牌不套用旁门兑现紧迫性。小主过渡门槛为主牌 ≥3 且不拆结构 |
 | `findWeakLeadCandidates` / `findWeakPairDisposalLeadCandidates` | 弱处置层：弱单、弱对、低价值清理 |
 
 `selectLeadAssetPool` 只取当前存在的最高资产层级进入 Monte Carlo。这样旁门 A 不会再被普通对子挤掉，AKK / AAKK 不会被拆成局部候选互相比较，普通对子只在弱处置层参与。Tier 4 内部若没有队友垫分计划且存在合法小主过渡，只让小主过渡进入模拟，避免空档期随手领弱副牌。
+
+**大主对子开局保护（`bigTrumpPairLeadAllowed`）**：
+- 王对、级牌对、主 A 对是全局最强控制 / 将吃资源，不能因为“主牌多”或“这对牌自身带分”就在开局/中盘主动领出。
+- `bigTrumpPairLeadAllowed` 只在残局（手牌 ≤6）主动放行这类大主对子；若全手无其他合法兜底，最终仍可出牌。
+- 拔主计划优先用低成本小主过渡或普通主牌，不用最高控制对裸拔。
 
 ### 先手打分——点数优先的资产评分（leadAssetScore）
 
@@ -205,7 +210,7 @@ AI 已不再走单一固定优先级表。无论先手还是跟牌，都走同�
 
 ### 先手合法性过滤（filterAllowedLeadAssets / allowTrumpLead）
 
-资产生成后由 `filterAllowedLeadAssets` 过滤；主牌先手由 `allowTrumpLead` 把关。小主过渡可在 Tier 4 空档期通过；其他主牌早期一般不许领，除非手牌偏少（剩 ≤5 墩）、主牌多（≥8 张或 ≥4 张强主）、副牌比主牌还多、需保护的暴露分多、或主牌保对价值高。非主走法始终放行。
+资产生成后由 `filterAllowedLeadAssets` 过滤；主牌先手由 `allowTrumpLead` 把关。小主过渡可在 Tier 4 空档期通过；其他主牌早期一般不许领，除非手牌偏少（剩 ≤5 墩）、主牌多（≥8 张或 ≥4 张强主）、副牌比主牌还多、需保护的暴露分多、主牌保对价值高，或需要拔主来解锁等待拔主的副牌赢家。非主走法始终放行。
 
 ### 先手规则基线（leadCardsRuleBased）
 
@@ -237,7 +242,8 @@ AI 已不再走单一固定优先级表。无论先手还是跟牌，都走同�
 **跟牌流程：** 与先手一致，走 候选生成 → 打分 → 蒙特卡洛：
 
 1. 规则基线（`followCardsRuleBased`）+ 非主/结构候选（`generateFollowCandidates`）+ 统一主牌控墩候选（`generateTrumpControlCandidates`）。
-2. 仅保留合法走法（`isValidPlay`），再过两道滤网：
+2. 仅保留合法走法（`isValidPlay`），再过三道滤网：
+   - `filterUnsafeSecondHandTrumpPointExposure`：P2 跟吊主、当前 0 分墩、后手仍有未知对手且本墩未锁定时，若存在合法 0 分替代牌，剔除裸出主分牌的候选，避免为了抢出牌权把 10/K/5 送进未知墩。
    - `filterTrumpControlMoves`：所有花主牌的候选统一用 Trump Control Decision 分类；高分墩或高主动权需求时，若存在锁定/争墩主牌，会剔除被动主牌。
    - `filterHighInitiativeWinningMoves`：当急需主动权（`initiativeNeed` ≥ 100）时，若存在「便宜、不拆对子、不动大主」的取胜走法则只保留它们；主牌走法还必须在 Trump Control 下不是被动且得分为正。
 3. 用 `scoreFollow` 打分，取前 5 名，再由蒙特卡洛择优。
@@ -283,6 +289,7 @@ AI 已不再走单一固定优先级表。无论先手还是跟牌，都走同�
 - 先找手中与先手同逻辑花色的牌（`suitCards`）
 - 有足够同花色牌 → 尝试压牌；无法压牌 → 出最弱同花色牌（若队友赢则出支持牌）
 - 同花色不够 → 先出所有同花色，剩余按策略补充
+- 多张跟牌且本门不够时，本门剩余分牌属于规则强制，必须出；但其他门补牌不是强制牌。若对手当前赢，补牌应优先 0 分牌，不得因为敌方已绝某门或保对子而额外垫 10/K/5 给对手。
 
 **跟牌子策略：**
 
@@ -323,6 +330,11 @@ AI 已不再走单一固定优先级表。无论先手还是跟牌，都走同�
 1. 非主牌优先于主牌
 2. 同类牌中，低分牌优先（0分 > 5分 > 10分）
 3. 同分中，按 rank 从小到大
+
+**智能垫牌（smartDiscard）：**
+- 对手当前赢时，`smartDiscard` 先按 `pointValue` 排序：只要有 0 分可补，就不额外垫其他门分牌给对手；必要时可以拆 0 分对子，优先级高于保对子和敌方绝门清理。
+- 队友当前赢且本墩安全时，才按支持逻辑优先垫高分牌。
+- 因跟牌规则被迫出的本门分牌不受此限制；限制只针对补其他门的自由填牌。
 
 **支持牌优先级（partnerSupportOrder）：**
 1. 高分牌优先（10/K/5 > 0分）
@@ -424,16 +436,18 @@ startNewGame()
 | 修改 AI 先手策略 | `AIPlayer.leadCards` / `buildLeadAssets` / `selectLeadAssetPool` |
 | 调整 AI 先手打分权重 / 优先级 | `AIPlayer.leadAssetScore` / `LeadAssetTier` |
 | 调整单个先手概念 | `findAbsoluteSideWinnerLeadCandidates`（兑现赢家）·`findSlamLeadCandidates`（安全控制组）·`findTractorLeadCandidates` / `findStrongPairLeadCandidates`（强结构）·`findTrumpTransferLeadCandidates` / `findLongSuitDevelopmentLeadCandidates`（主动权建设） |
+| 调整开局大主对子保护（王对 / 级牌对 / 主A对） | `AIPlayer.bigTrumpPairLeadAllowed` |
 | 调整拆对子/结构惩罚 | `AIPlayer.structureBreakPenalty` / `strongStructureBreakPenalty`（跟牌）与 `structureFragmentationCost` / `mixedSlamFragmentationCost`（先手资产完整性） |
 | 修改 AI 蒙特卡洛模拟 | `AIPlayer.monteCarloBestMove` / `simulateCurrentTrick` / `monteCarloTopMoveCount` / `monteCarloSimulationCount` |
 | 修改 AI 甩牌领出条件 | `AIPlayer.findSlamLead` / `isEffectivelyBiggestSingle` / `isEffectivelyBiggestPair` |
 | 修改 AI 跟牌策略 | `AIPlayer.followCards`（候选）/ `scoreFollow`（权重）/ `followTractor` / `followPair` |
 | 调整 AI 跟牌打分权重 | `AIPlayer.scoreFollow`；花主牌走法优先调 `trumpControlDecision` / `trumpControlCost` / `trumpCostDamping` |
+| 修改 P2 跟吊主 0 分未知墩裸出分牌过滤 | `AIPlayer.filterUnsafeSecondHandTrumpPointExposure` |
 | 修改 AI 主牌控墩逻辑（吊主、将吃、盖吃、保队友、抢主动权） | `AIPlayer.generateTrumpControlCandidates` / `filterTrumpControlMoves` / `trumpControlDecision` / `bestTrumpControlFill` / `isSecureWinningTrumpFollow` |
 | 修改 AI 绝花色后填牌逻辑（将吃 / 垫分） | `AIPlayer.voidFillCards` / `bestTrumpControlFill`（`partnerAtRisk` / `enemySubsequentVoidInLead` 只影响回退路径）|
 | 修改 AI 安全出主逻辑 | `AIPlayer.isSafeTrumpFiller` / `isSafeTrump` |
 | 修改 AI 激进模式阈值 | `AIPlayer.followCards`（`trickPoints` / `attackScore` 判断处）|
-| 修改垫牌/支持牌逻辑 | `AIPlayer.discardOrder` / `partnerSupportOrder` |
+| 修改垫牌/支持牌逻辑 | `AIPlayer.smartDiscard` / `discardOrder` / `partnerSupportOrder` |
 | 修改主牌大小顺序 | `CardComparator.trumpWeight` |
 | 修改升级得分阈值 | `GameEngine.resolveRound` |
 | 修改 AI 亮主限制 | `GameEngine.aiConsiderDeclaration` |
