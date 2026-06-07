@@ -22,6 +22,7 @@ struct MenuView: View {
 
             // 装饰牌
             decorativeCards
+                .allowsHitTesting(false)
 
             // 横屏：左右分栏布局
             HStack(spacing: 0) {
@@ -151,10 +152,10 @@ struct MenuView: View {
                 .offset(x: 130, y: -180)
                 .opacity(0.5)
 
-            CardView(card: Card(suit: nil, rank: .bigJoker))
+            CardView(card: Card(suit: .clubs, rank: .king))
                 .rotationEffect(.degrees(-8))
-                .offset(x: 150, y: 120)
-                .opacity(0.4)
+                .offset(x: 240, y: 190)
+                .opacity(0.25)
 
             CardView(card: Card(suit: .diamonds, rank: .ace))
                 .rotationEffect(.degrees(20))

@@ -1,8 +1,7 @@
 import SwiftUI
+import UIKit
 
 struct CardView: View {
-    @Environment(\.colorScheme) private var colorScheme
-
     let card: Card
     var isSelected: Bool = false
     var isFaceDown: Bool = false
@@ -14,33 +13,53 @@ struct CardView: View {
     }
 
     var body: some View {
-        if isFaceDown {
-            cardBack
-        } else {
-            cardFront
+        Group {
+            if isFaceDown {
+                cardBack
+            } else {
+                cardFront
+            }
         }
+        .environment(\.colorScheme, .light)
     }
 
     private var cardFront: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: isSmall ? 6 : 10)
-                .fill(Color(.systemBackground))
+        let corner: CGFloat = isSmall ? 6 : 10
+        return ZStack {
+            RoundedRectangle(cornerRadius: corner)
+                .fill(Color.white)
                 .shadow(color: cardShadowColor, radius: isSmall ? 2 : 4, x: 0, y: cardShadowYOffset)
                 .shadow(color: cardGlowColor, radius: isSmall ? 1 : 3, x: 0, y: 0)
-                .overlay {
-                    RoundedRectangle(cornerRadius: isSmall ? 6 : 10)
-                        .strokeBorder(cardEdgeColor, lineWidth: isSmall ? 0.75 : 1)
-                }
 
-            if isSelected {
-                RoundedRectangle(cornerRadius: isSmall ? 6 : 10)
-                    .strokeBorder(Color.blue, lineWidth: 2.5)
-            }
-
-            if card.isJoker {
+            // J/Q/K 与大小王：若已放入对应图片资源则用图片牌面，否则回退到矢量画法。
+            if useFaceImage, let name = faceImageName {
+                // 用"隐藏的矢量牌内容"占位，确定与其它牌完全相同的牌面尺寸；
+                // 图片用 .fit 完整显示（不裁剪 J/角标），白底填满 letterbox（扑克牌本就是白色），
+                // 这样既和其它牌一样大，又不会被上下裁切。
+                (card.isJoker ? AnyView(jokerContent) : AnyView(regularCardContent))
+                    .hidden()
+                    .overlay {
+                        ZStack {
+                            Color.white
+                            Image(name)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .padding(faceImageInset)
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: corner))
+            } else if card.isJoker {
                 jokerContent
             } else {
                 regularCardContent
+            }
+
+            RoundedRectangle(cornerRadius: corner)
+                .strokeBorder(cardEdgeColor, lineWidth: isSmall ? 0.75 : 1)
+
+            if isSelected {
+                RoundedRectangle(cornerRadius: corner)
+                    .strokeBorder(Color.blue, lineWidth: 2.5)
             }
         }
         .frame(width: baseCardWidth, height: baseCardHeight)
@@ -48,6 +67,34 @@ struct CardView: View {
         .frame(width: cardWidth, height: cardHeight)
         .scaleEffect(isSelected ? 1.05 : 1.0)
         .animation(.spring(response: 0.2, dampingFraction: 0.7), value: isSelected)
+    }
+
+    /// 替换 J/Q/K 与大小王牌面（数字牌仍用矢量画法）。
+    /// 资源命名：card_J_hearts / card_Q_spades / card_K_clubs …，大小王为 card_joker_big / card_joker_small。
+    private var faceImageName: String? {
+        switch card.rank {
+        case .bigJoker:   return "card_joker_big"
+        case .smallJoker: return "card_joker_small"
+        case .jack, .queen, .king:
+            guard let suit = card.suit else { return nil }
+            let rankKey = card.rank == .jack ? "J" : (card.rank == .queen ? "Q" : "K")
+            let suitKey: String
+            switch suit {
+            case .spades:   suitKey = "spades"
+            case .hearts:   suitKey = "hearts"
+            case .diamonds: suitKey = "diamonds"
+            case .clubs:    suitKey = "clubs"
+            }
+            return "card_\(rankKey)_\(suitKey)"
+        default:
+            return nil
+        }
+    }
+
+    /// 对应图片资源存在时启用图片牌面（大牌 / 小牌均适用）；否则回退矢量画法。
+    private var useFaceImage: Bool {
+        guard let name = faceImageName else { return false }
+        return UIImage(named: name) != nil
     }
 
     private var cardBack: some View {
@@ -88,7 +135,7 @@ struct CardView: View {
                     Text(card.suit?.rawValue ?? "")
                         .font(.system(size: isSmall ? 9 : 12))
                 }
-                .foregroundColor(isRed ? .red : Color(.label))
+                .foregroundColor(isRed ? .red : .black)
                 Spacer()
             }
             .padding(.horizontal, isSmall ? 4 : 6)
@@ -98,7 +145,7 @@ struct CardView: View {
 
             Text(card.suit?.rawValue ?? "")
                 .font(.system(size: isSmall ? 22 : 34))
-                .foregroundColor(isRed ? Color.red.opacity(0.85) : Color(.label).opacity(0.85))
+                .foregroundColor(isRed ? Color.red.opacity(0.85) : Color.black.opacity(0.85))
 
             Spacer()
 
@@ -110,7 +157,7 @@ struct CardView: View {
                     Text(card.rank.display)
                         .font(.system(size: isSmall ? 11 : 15, weight: .bold, design: .rounded))
                 }
-                .foregroundColor(isRed ? .red : Color(.label))
+                .foregroundColor(isRed ? .red : .black)
                 .rotationEffect(.degrees(180))
             }
             .padding(.horizontal, isSmall ? 4 : 6)
@@ -172,23 +219,15 @@ struct CardView: View {
     private var baseCardHeight: CGFloat { isSmall ? 58 : 90 }
     private var cardWidth: CGFloat  { baseCardWidth * sizeScale }
     private var cardHeight: CGFloat { baseCardHeight * sizeScale }
-    private var isDarkMode: Bool { colorScheme == .dark }
+    private var faceImageInset: CGFloat { card.isJoker ? (isSmall ? 1.5 : 2.5) : 0 }
     private var cardShadowYOffset: CGFloat { isSmall ? 1 : 2 }
-    private var cardShadowColor: Color {
-        isDarkMode ? .white.opacity(0.16) : .black.opacity(0.2)
-    }
-    private var cardGlowColor: Color {
-        isDarkMode ? .white.opacity(0.12) : .clear
-    }
-    private var cardEdgeColor: Color {
-        isDarkMode ? .white.opacity(0.26) : .black.opacity(0.08)
-    }
+    private var cardShadowColor: Color { .black.opacity(0.2) }
+    private var cardGlowColor: Color { .clear }
+    private var cardEdgeColor: Color { .black.opacity(0.08) }
 }
 
 // MARK: - Mini card for AI players
 struct MiniCardBack: View {
-    @Environment(\.colorScheme) private var colorScheme
-
     var count: Int
     var cardHeight: CGFloat = 52
 
@@ -212,18 +251,12 @@ struct MiniCardBack: View {
             }
         }
         .frame(height: cardHeight)  // 固定高度，count=0 时也保留空间
+        .environment(\.colorScheme, .light)
     }
 
-    private var isDarkMode: Bool { colorScheme == .dark }
-    private var miniCardShadowColor: Color {
-        isDarkMode ? .white.opacity(0.16) : .black.opacity(0.2)
-    }
-    private var miniCardGlowColor: Color {
-        isDarkMode ? .white.opacity(0.12) : .clear
-    }
-    private var miniCardEdgeColor: Color {
-        isDarkMode ? .white.opacity(0.24) : .black.opacity(0.08)
-    }
+    private var miniCardShadowColor: Color { .black.opacity(0.2) }
+    private var miniCardGlowColor: Color { .clear }
+    private var miniCardEdgeColor: Color { .black.opacity(0.08) }
 }
 
 #Preview {
