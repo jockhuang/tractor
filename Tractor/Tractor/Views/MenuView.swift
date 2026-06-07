@@ -6,6 +6,9 @@ struct MenuView: View {
     @State private var showRules = false
     @State private var showLobby = false
     @State private var soundEnabled = SoundManager.shared.soundEnabled
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "未知"
+    }
 
     var body: some View {
         ZStack {
@@ -22,6 +25,7 @@ struct MenuView: View {
 
             // 装饰牌
             decorativeCards
+                .allowsHitTesting(false)
 
             // 横屏：左右分栏布局
             HStack(spacing: 0) {
@@ -102,7 +106,7 @@ struct MenuView: View {
             VStack {
                 Spacer()
                 HStack {
-                    Text("版本 1.2  ·  南北 vs 东西")
+                    Text("版本 \(appVersion)  ·  南北 vs 东西")
                         .font(.caption)
                         .foregroundColor(.white.opacity(0.4))
 
@@ -151,10 +155,10 @@ struct MenuView: View {
                 .offset(x: 130, y: -180)
                 .opacity(0.5)
 
-            CardView(card: Card(suit: nil, rank: .bigJoker))
+            CardView(card: Card(suit: .clubs, rank: .king))
                 .rotationEffect(.degrees(-8))
-                .offset(x: 150, y: 120)
-                .opacity(0.4)
+                .offset(x: 240, y: 190)
+                .opacity(0.25)
 
             CardView(card: Card(suit: .diamonds, rank: .ace))
                 .rotationEffect(.degrees(20))

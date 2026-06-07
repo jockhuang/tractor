@@ -45,8 +45,17 @@ extension AIPlayer {
             evaluator.isValidPlay(selected: $0.cards, hand: hand, leadCards: leadCards)
         }
 
-        let trumpControlFilteredLegal = filterTrumpControlMoves(
+        let exposureFilteredLegal = filterUnsafeSecondHandTrumpPointExposure(
             legal,
+            leadCards: leadCards,
+            hand: hand,
+            position: position,
+            state: state,
+            evaluator: evaluator,
+            ctx: ctx
+        )
+        let trumpControlFilteredLegal = filterTrumpControlMoves(
+            exposureFilteredLegal,
             leadCards: leadCards,
             hand: hand,
             position: position,
@@ -740,29 +749,36 @@ extension AIPlayer {
             }
         }
 
+        if enemyWinning {
+            let ordered = cards.sorted { a, b in
+                if a.pointValue != b.pointValue { return a.pointValue < b.pointValue }
+                let ta = tier(a), tb = tier(b)
+                if ta != tb { return ta < tb }
+                let pa = isPaired(a), pb = isPaired(b)
+                if pa != pb { return !pa }
+                return discardOrder(a, before: b, trumpSuit: ts, trumpRank: tr)
+            }
+            return Array(ordered.prefix(count))
+        }
+
         // 散牌按 tier 和分值/rank 排序
         // 队友赢时（!enemyWinning）：同 tier 内高分牌优先（垫分给队友）
-        // 敌方赢时（enemyWinning）：同 tier 内低分牌优先（避免送分）
         let singletons = cards
             .filter { !isPaired($0) }
             .sorted { a, b in
                 let ta = tier(a), tb = tier(b)
                 if ta != tb { return ta < tb }
-                if a.pointValue != b.pointValue {
-                    return enemyWinning ? a.pointValue < b.pointValue : a.pointValue > b.pointValue
-                }
+                if a.pointValue != b.pointValue { return a.pointValue > b.pointValue }
                 return discardOrder(a, before: b, trumpSuit: ts, trumpRank: tr)
             }
 
-        // 配对组按 tier（取首张代表）排序，同 tier 内分值处理同上
+        // 配对组按 tier（取首张代表）排序，同 tier 内高分牌优先垫给队友
         let pairedGroups = pairGroupMap.values
             .filter { $0.count >= 2 }
             .sorted { a, b in
                 let ta = tier(a[0]), tb = tier(b[0])
                 if ta != tb { return ta < tb }
-                if a[0].pointValue != b[0].pointValue {
-                    return enemyWinning ? a[0].pointValue < b[0].pointValue : a[0].pointValue > b[0].pointValue
-                }
+                if a[0].pointValue != b[0].pointValue { return a[0].pointValue > b[0].pointValue }
                 return discardOrder(a[0], before: b[0], trumpSuit: ts, trumpRank: tr)
             }
 
@@ -1071,6 +1087,43 @@ extension AIPlayer {
             }
         }
         return moves
+    }
+
+
+    /// P2 跟吊主时，后面仍有未知对手，且本墩还没锁定，不要为了抢出牌权把主分牌裸送进 0 分墩。
+    /// 若没有无分合法牌，或该走法已经能锁定本墩，则不拦。
+    static func filterUnsafeSecondHandTrumpPointExposure(
+        _ moves: [AIMove],
+        leadCards: [Card],
+        hand: [Card],
+        position: PlayerPosition,
+        state: GameState,
+        evaluator: TrickEvaluator,
+        ctx: AIContext
+    ) -> [AIMove] {
+        guard moves.count > 1,
+              evaluator.dominantSuit(of: leadCards) == nil,
+              state.currentTrick.plays.count == 1 else { return moves }
+
+        let futureUnknownOpponents = unplayedSubsequentPositions(after: position, in: state)
+            .filter { $0.team != position.team && !ctx.isVoid($0, key: "TRUMP") }
+        guard !futureUnknownOpponents.isEmpty else { return moves }
+
+        let trickPoints = state.currentTrick.plays.flatMap(\.cards).reduce(0) { $0 + $1.pointValue }
+        guard trickPoints == 0 else { return moves }
+
+        let nonRisky = moves.filter { move in
+            let playedPoints = move.cards.reduce(0) { $0 + $1.pointValue }
+            if playedPoints == 0 { return true }
+            guard candidateWinsTrick(move.cards, position: position, state: state, evaluator: evaluator),
+                  let highTrump = move.cards
+                    .filter({ CardComparator.isTrump($0, trumpSuit: state.trumpSuit, trumpRank: state.trumpRank) })
+                    .max(by: {
+                        CardComparator.beats($1, $0, trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
+                    }) else { return false }
+            return noUnknownHigherTrumpThan(highTrump, hand: hand, ts: state.trumpSuit, tr: state.trumpRank, ctx: ctx)
+        }
+        return nonRisky.isEmpty ? moves : nonRisky
     }
 
 

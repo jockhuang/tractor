@@ -1,5 +1,83 @@
 import XCTest
+import SwiftUI
+import UIKit
 @testable import Tractor_Game
+
+/// Renders a realistic dark-mode hand row to a bitmap on the simulator and measures
+/// each card's visible height, so card-size issues are verified empirically.
+/// This reproduces the real bug context (dark mode: card body is black, distinct from
+/// the green table) — a plain self-size render does NOT catch it.
+final class CardViewLayoutTests: XCTestCase {
+
+    private let scale: CGFloat = 1.2
+    private let renderScale: CGFloat = 2
+
+    /// Per-card visible height (points) in a real hand-row layout, keyed by sample x.
+    @MainActor
+    private func cardHeights(_ cards: [Card]) -> [CGFloat] {
+        let s = scale
+        let row = HStack(spacing: -(64 * s * 0.45)) {
+            ForEach(Array(cards.enumerated()), id: \.offset) { _, c in
+                CardView(card: c, sizeScale: s)
+            }
+        }
+        .padding(20)
+        .background(Color(red: 0.10, green: 0.45, blue: 0.20))   // table green
+        .environment(\.colorScheme, .dark)                        // game runs dark
+
+        let renderer = ImageRenderer(content: row)
+        renderer.scale = renderScale
+        guard let ui = renderer.uiImage, let cg = ui.cgImage else { return [] }
+        let w = cg.width, h = cg.height
+        var data = [UInt8](repeating: 0, count: w * h * 4)
+        guard let ctx = CGContext(
+            data: &data, width: w, height: h, bitsPerComponent: 8,
+            bytesPerRow: w * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return [] }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        func isGreen(_ x: Int, _ y: Int) -> Bool {
+            let i = (y * w + x) * 4
+            return abs(Int(data[i]) - 25) < 45 && abs(Int(data[i+1]) - 115) < 50 && abs(Int(data[i+2]) - 51) < 45
+        }
+        // sample a column at the centre of each card and measure non-green vertical extent
+        let n = cards.count
+        var heights: [CGFloat] = []
+        for idx in 0..<n {
+            // centre x of card idx in the rendered image (points → pixels)
+            let frac = (Double(idx) + 0.5) / Double(n)
+            let x = min(w - 1, max(0, Int(Double(w) * (0.12 + 0.76 * frac))))
+            var minY = h, maxY = -1
+            for y in 0..<h where !isGreen(x, y) {
+                if y < minY { minY = y }; if y > maxY { maxY = y }
+            }
+            heights.append(maxY >= minY ? CGFloat(maxY - minY + 1) / renderScale : 0)
+        }
+        return heights
+    }
+
+    @MainActor
+    func testJokerCardSameHeightAsVectorCardInHand() {
+        // small joker | 2♥ | K♠ | A♥ | big joker
+        let cards: [Card] = [
+            Card(suit: nil, rank: .smallJoker),
+            Card(suit: .hearts, rank: .two),
+            Card(suit: .spades, rank: .king),
+            Card(suit: .hearts, rank: .ace),
+            Card(suit: nil, rank: .bigJoker),
+        ]
+        let heights = cardHeights(cards)
+        print("CARD HEIGHTS (pt): \(heights)")
+        guard heights.count == cards.count else { XCTFail("render failed: \(heights)"); return }
+
+        // reference = a vector card (2♥)
+        let vectorH = heights[1]
+        XCTAssertGreaterThan(vectorH, 60, "vector card height looks wrong: \(vectorH)")
+        XCTAssertEqual(heights[0], vectorH, accuracy: 6, "small joker height != vector")
+        XCTAssertEqual(heights[4], vectorH, accuracy: 6, "big joker height != vector")
+    }
+}
 
 /// 战术模式 / 阻分（Point Denial）的 XCTest 用例。
 /// 复用与 AITests/main.swift（独立 swiftc 跑测）相同的场景，验证 Monte Carlo 在
@@ -37,6 +115,15 @@ final class AITacticalModeTests: XCTestCase {
         s.players[pos.rawValue].hand = cards
     }
 
+    private func enemiesVoidClubsTrick() -> Trick {
+        var t = Trick(leadPosition: .west)
+        t.plays.append((position: .west, cards: [c(.clubs, .four)]))
+        t.plays.append((position: .north, cards: [c(.diamonds, .four)]))
+        t.plays.append((position: .east, cards: [c(.clubs, .five)]))
+        t.plays.append((position: .south, cards: [c(.diamonds, .six)]))
+        return t
+    }
+
     private func beats(_ a: Card, _ b: Card) -> Bool {
         CardComparator.beats(a, b, trumpSuit: ts, trumpRank: tr)
     }
@@ -68,6 +155,80 @@ final class AITacticalModeTests: XCTestCase {
         XCTAssertEqual(mode, .normal, "无分且非最后行动者应为 normal，实际=\(mode)")
         let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
         XCTAssertEqual(chosen.first?.rank, .three, "无分应保留♠A出♠3，chosen=\(chosen.map { $0.shortDisplay })")
+    }
+
+    // P2 跟吊主：后手还有未知对手，0 分墩未锁定时，即使手里后续资产很强，
+    // 也不应为了抢出牌权把主10这类分牌裸送进去。
+    func testSecondHandTrumpPullDoesNotExposePointTrumpIntoUnknownTrick() {
+        let s = makeState()
+        setTrick(s, lead: .west,
+                 plays: [(.west, [c(.spades, .seven)])],
+                 turn: .north)
+        setHand(s, .north,
+                [c(.spades, .ten), c(.spades, .three),
+                 c(.hearts, .ace), c(.clubs, .ace), c(.diamonds, .ace),
+                 c(.hearts, .king), c(.clubs, .king), c(.diamonds, .king),
+                 c(.hearts, .queen), c(.clubs, .queen), c(.diamonds, .queen)])
+
+        let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
+        XCTAssertEqual(chosen.count, 1)
+        XCTAssertEqual(chosen[0].pointValue, 0,
+                       "P2 吊主未知墩不应裸出主分牌，chosen=\(chosen.map { $0.shortDisplay })")
+        XCTAssertEqual(chosen[0].rank, .three,
+                       "应出可用的无分小主，chosen=\(chosen.map { $0.shortDisplay })")
+    }
+
+    // 开局主牌很多也不应直接领对王；拔主应先用低成本小主，保留最高控制对。
+    func testEarlyLeadPreservesJokerPairWhenLowTrumpTransferExists() {
+        let s = makeState()
+        s.currentTrick = Trick(leadPosition: .north)
+        s.currentLeader = .north
+        s.currentTurn = .north
+        setHand(s, .north,
+                [c(nil, .bigJoker), c(nil, .bigJoker),
+                 c(.spades, .three), c(.spades, .four), c(.spades, .six),
+                 c(.spades, .seven), c(.spades, .eight), c(.spades, .nine),
+                 c(.hearts, .three), c(.clubs, .four), c(.diamonds, .six)])
+
+        let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
+        XCTAssertEqual(chosen.map { $0.shortDisplay }, ["♠3"],
+                       "开局不应直接领对王，chosen=\(chosen.map { $0.shortDisplay })")
+    }
+
+    // 开局也不应直接领对级牌；即便主牌很长，级牌对仍是后续控墩资源。
+    func testEarlyLeadPreservesLevelPairWhenLowTrumpTransferExists() {
+        let s = makeState()
+        s.currentTrick = Trick(leadPosition: .north)
+        s.currentLeader = .north
+        s.currentTurn = .north
+        setHand(s, .north,
+                [c(.hearts, .two), c(.hearts, .two),
+                 c(.spades, .three), c(.spades, .four), c(.spades, .six),
+                 c(.spades, .seven), c(.spades, .eight), c(.spades, .nine),
+                 c(.hearts, .three), c(.clubs, .four), c(.diamonds, .six)])
+
+        let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
+        XCTAssertEqual(chosen.map { $0.shortDisplay }, ["♠3"],
+                       "开局不应直接领对级牌，chosen=\(chosen.map { $0.shortDisplay })")
+    }
+
+    // 多张跟牌时，本门不够且只剩分牌：本门分牌被迫要出，但其他门补牌不能再给对手垫分。
+    func testPartialFollowDoesNotPadEnemyWithOffSuitPoints() {
+        let s = makeState()
+        s.completedTricks = [enemiesVoidClubsTrick()]
+        setTrick(s, lead: .south,
+                 plays: [(.south, [c(.hearts, .seven), c(.hearts, .seven)])],
+                 turn: .west)
+        setHand(s, .west, [c(.hearts, .king), c(.clubs, .ten), c(.diamonds, .three)])
+
+        let chosen = AIPlayer.chooseCards(position: .west, state: s, evaluator: eval)
+        XCTAssertEqual(chosen.count, 2)
+        XCTAssertTrue(chosen.contains { $0.suit == .hearts && $0.rank == .king },
+                      "本门剩余♥K 是被迫跟出的分牌，chosen=\(chosen.map { $0.shortDisplay })")
+        XCTAssertTrue(chosen.contains { $0.suit == .diamonds && $0.rank == .three },
+                      "补其他门时应选0分♦3，不应垫♣10给对手，chosen=\(chosen.map { $0.shortDisplay })")
+        XCTAssertFalse(chosen.contains { $0.suit == .clubs && $0.rank == .ten },
+                       "其他门分牌不是被迫牌，不应额外垫给对手，chosen=\(chosen.map { $0.shortDisplay })")
     }
 
     // Test 2b：无分但我是本队最后行动者且后手有对手 → 仍进入 Point Denial（阻止对手用分牌赢墩）。

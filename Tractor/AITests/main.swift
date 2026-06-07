@@ -24,6 +24,15 @@ func setTrick(_ s: GameState, lead: PlayerPosition, plays: [(PlayerPosition, [Ca
     s.currentTurn = turn
 }
 
+func enemiesVoidClubsTrick() -> Trick {
+    var t = Trick(leadPosition: .west)
+    t.plays.append((position: .west, cards: [c(.clubs, .four)]))
+    t.plays.append((position: .north, cards: [c(.diamonds, .four)]))
+    t.plays.append((position: .east, cards: [c(.clubs, .five)]))
+    t.plays.append((position: .south, cards: [c(.diamonds, .six)]))
+    return t
+}
+
 var failures: [String] = []
 func check(_ cond: Bool, _ name: String, _ detail: @autoclosure () -> String = "") {
     if cond { print("✅ \(name)") }
@@ -63,6 +72,75 @@ do {
     check(mode == .normal, "Test2 无分且非最后行动者 → normal", "mode=\(mode)")
     let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
     check(chosen.count == 1 && chosen[0].rank == .three, "Test2 无分不浪费大主(出♠3保留♠A)",
+          "chosen=\(chosen.map { $0.shortDisplay })")
+}
+
+// ── Test 2a：P2 跟吊主，后手还有未知对手，0 分墩不裸送主分牌 ──
+do {
+    let s = makeState(trump: ts, rank: tr)
+    setTrick(s, lead: .west,
+             plays: [(.west, [c(.spades, .seven)])],
+             turn: .north)
+    s.players[PlayerPosition.north.rawValue].hand =
+        [c(.spades, .ten), c(.spades, .three),
+         c(.hearts, .ace), c(.clubs, .ace), c(.diamonds, .ace),
+         c(.hearts, .king), c(.clubs, .king), c(.diamonds, .king),
+         c(.hearts, .queen), c(.clubs, .queen), c(.diamonds, .queen)]
+    let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
+    check(chosen.count == 1 && chosen[0].pointValue == 0 && chosen[0].rank == .three,
+          "Test2a P2吊主未知0分墩不裸送主分牌",
+          "chosen=\(chosen.map { $0.shortDisplay })")
+}
+
+// ── Test 2a.1：开局主牌多也不直接领对王 ──
+do {
+    let s = makeState(trump: ts, rank: tr)
+    s.currentTrick = Trick(leadPosition: .north)
+    s.currentLeader = .north
+    s.currentTurn = .north
+    s.players[PlayerPosition.north.rawValue].hand =
+        [c(nil, .bigJoker), c(nil, .bigJoker),
+         c(.spades, .three), c(.spades, .four), c(.spades, .six),
+         c(.spades, .seven), c(.spades, .eight), c(.spades, .nine),
+         c(.hearts, .three), c(.clubs, .four), c(.diamonds, .six)]
+    let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
+    check(chosen.map { $0.shortDisplay } == ["♠3"],
+          "Test2a.1 开局保留对王，先领低成本小主",
+          "chosen=\(chosen.map { $0.shortDisplay })")
+}
+
+// ── Test 2a.2：开局主牌多也不直接领对级牌 ──
+do {
+    let s = makeState(trump: ts, rank: tr)
+    s.currentTrick = Trick(leadPosition: .north)
+    s.currentLeader = .north
+    s.currentTurn = .north
+    s.players[PlayerPosition.north.rawValue].hand =
+        [c(.hearts, .two), c(.hearts, .two),
+         c(.spades, .three), c(.spades, .four), c(.spades, .six),
+         c(.spades, .seven), c(.spades, .eight), c(.spades, .nine),
+         c(.hearts, .three), c(.clubs, .four), c(.diamonds, .six)]
+    let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
+    check(chosen.map { $0.shortDisplay } == ["♠3"],
+          "Test2a.2 开局保留对级牌，先领低成本小主",
+          "chosen=\(chosen.map { $0.shortDisplay })")
+}
+
+// ── Test 2a.3：多张跟牌本门分牌被迫出，但其他门补牌不额外垫分给对手 ──
+do {
+    let s = makeState(trump: ts, rank: tr)
+    s.completedTricks = [enemiesVoidClubsTrick()]
+    setTrick(s, lead: .south,
+             plays: [(.south, [c(.hearts, .seven), c(.hearts, .seven)])],
+             turn: .west)
+    s.players[PlayerPosition.west.rawValue].hand =
+        [c(.hearts, .king), c(.clubs, .ten), c(.diamonds, .three)]
+    let chosen = AIPlayer.chooseCards(position: .west, state: s, evaluator: eval)
+    let forcedPoint = chosen.contains { $0.suit == .hearts && $0.rank == .king }
+    let usesSafeFill = chosen.contains { $0.suit == .diamonds && $0.rank == .three }
+    let avoidsOffSuitPoint = !chosen.contains { $0.suit == .clubs && $0.rank == .ten }
+    check(chosen.count == 2 && forcedPoint && usesSafeFill && avoidsOffSuitPoint,
+          "Test2a.3 本门分牌被迫出，其他门补0分牌不垫分",
           "chosen=\(chosen.map { $0.shortDisplay })")
 }
 
