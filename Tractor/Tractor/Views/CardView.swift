@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct CardView: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -22,25 +23,32 @@ struct CardView: View {
     }
 
     private var cardFront: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: isSmall ? 6 : 10)
+        let corner: CGFloat = isSmall ? 6 : 10
+        return ZStack {
+            RoundedRectangle(cornerRadius: corner)
                 .fill(Color(.systemBackground))
                 .shadow(color: cardShadowColor, radius: isSmall ? 2 : 4, x: 0, y: cardShadowYOffset)
                 .shadow(color: cardGlowColor, radius: isSmall ? 1 : 3, x: 0, y: 0)
-                .overlay {
-                    RoundedRectangle(cornerRadius: isSmall ? 6 : 10)
-                        .strokeBorder(cardEdgeColor, lineWidth: isSmall ? 0.75 : 1)
-                }
 
-            if isSelected {
-                RoundedRectangle(cornerRadius: isSmall ? 6 : 10)
-                    .strokeBorder(Color.blue, lineWidth: 2.5)
-            }
-
-            if card.isJoker {
+            // J/Q/K 与大小王：若已放入对应图片资源则用图片牌面，否则回退到矢量画法。
+            if useFaceImage, let name = faceImageName {
+                Image(name)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: baseCardWidth, height: baseCardHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: corner))
+            } else if card.isJoker {
                 jokerContent
             } else {
                 regularCardContent
+            }
+
+            RoundedRectangle(cornerRadius: corner)
+                .strokeBorder(cardEdgeColor, lineWidth: isSmall ? 0.75 : 1)
+
+            if isSelected {
+                RoundedRectangle(cornerRadius: corner)
+                    .strokeBorder(Color.blue, lineWidth: 2.5)
             }
         }
         .frame(width: baseCardWidth, height: baseCardHeight)
@@ -48,6 +56,34 @@ struct CardView: View {
         .frame(width: cardWidth, height: cardHeight)
         .scaleEffect(isSelected ? 1.05 : 1.0)
         .animation(.spring(response: 0.2, dampingFraction: 0.7), value: isSelected)
+    }
+
+    /// 替换 J/Q/K 与大小王牌面（数字牌仍用矢量画法）。
+    /// 资源命名：card_J_hearts / card_Q_spades / card_K_clubs …，大小王为 card_joker_big / card_joker_small。
+    private var faceImageName: String? {
+        switch card.rank {
+        case .bigJoker:   return "card_joker_big"
+        case .smallJoker: return "card_joker_small"
+        case .jack, .queen, .king:
+            guard let suit = card.suit else { return nil }
+            let rankKey = card.rank == .jack ? "J" : (card.rank == .queen ? "Q" : "K")
+            let suitKey: String
+            switch suit {
+            case .spades:   suitKey = "spades"
+            case .hearts:   suitKey = "hearts"
+            case .diamonds: suitKey = "diamonds"
+            case .clubs:    suitKey = "clubs"
+            }
+            return "card_\(rankKey)_\(suitKey)"
+        default:
+            return nil
+        }
+    }
+
+    /// 对应图片资源存在时启用图片牌面（大牌 / 小牌均适用）；否则回退矢量画法。
+    private var useFaceImage: Bool {
+        guard let name = faceImageName else { return false }
+        return UIImage(named: name) != nil
     }
 
     private var cardBack: some View {
