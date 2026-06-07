@@ -891,11 +891,9 @@ extension AIPlayer {
 
 
     /// 「大主对子」（王对 / 级牌对 / 主A对，即 `isBigTrump` 的对子）是否放行为先手候选。
-    /// 这类牌是全局最强的控制 / 将吃资源，开局领出基本抓不到分、只会白白消耗牌权，
-    /// 因此默认**不**作为先手候选（仿 Tier 4 的 `!isBigTrump` 处理）；仅在以下情形之一放行：
-    /// - 拔主：手握足够长的主牌（≥8，或庄家方且≥6），主动领大主对拔掉对手主牌是既定计划
-    /// - 带大量分：这对牌自身分值 ≥ 10（如级牌为 5/10/K 时的级牌对）
-    /// - 残局：手牌已 ≤ 6 张，留牌无意义，应尽快兑现
+    /// 这类牌是全局最强的控制 / 将吃资源。主牌够长只说明可以拔主，不说明应该用最高控制对拔；
+    /// 开局和中盘应优先用低成本小主过渡 / 普通主牌拔主，避免把对王、对级牌直接消耗掉。
+    /// 因此只有残局才主动放行；若全手没有其他可用走法，最终兜底仍可出合法牌。
     static func bigTrumpPairLeadAllowed(
         _ pair: [Card],
         hand: [Card],
@@ -904,14 +902,8 @@ extension AIPlayer {
         ts: Suit?,
         tr: Rank
     ) -> Bool {
-        // 带大量分
-        if pair.reduce(0, { $0 + $1.pointValue }) >= 10 { return true }
         // 残局
         if hand.count <= 6 { return true }
-        // 拔主：主牌足够长（或庄家方且主牌不少）才主动拔主
-        let trumpCount = trumpCards(in: hand, ts: ts, tr: tr).count
-        if trumpCount >= 8 { return true }
-        if state.dealerTeamIdx == position.team && trumpCount >= 6 { return true }
         return false
     }
 

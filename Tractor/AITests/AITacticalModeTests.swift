@@ -37,6 +37,15 @@ final class AITacticalModeTests: XCTestCase {
         s.players[pos.rawValue].hand = cards
     }
 
+    private func enemiesVoidClubsTrick() -> Trick {
+        var t = Trick(leadPosition: .west)
+        t.plays.append((position: .west, cards: [c(.clubs, .four)]))
+        t.plays.append((position: .north, cards: [c(.diamonds, .four)]))
+        t.plays.append((position: .east, cards: [c(.clubs, .five)]))
+        t.plays.append((position: .south, cards: [c(.diamonds, .six)]))
+        return t
+    }
+
     private func beats(_ a: Card, _ b: Card) -> Bool {
         CardComparator.beats(a, b, trumpSuit: ts, trumpRank: tr)
     }
@@ -68,6 +77,80 @@ final class AITacticalModeTests: XCTestCase {
         XCTAssertEqual(mode, .normal, "无分且非最后行动者应为 normal，实际=\(mode)")
         let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
         XCTAssertEqual(chosen.first?.rank, .three, "无分应保留♠A出♠3，chosen=\(chosen.map { $0.shortDisplay })")
+    }
+
+    // P2 跟吊主：后手还有未知对手，0 分墩未锁定时，即使手里后续资产很强，
+    // 也不应为了抢出牌权把主10这类分牌裸送进去。
+    func testSecondHandTrumpPullDoesNotExposePointTrumpIntoUnknownTrick() {
+        let s = makeState()
+        setTrick(s, lead: .west,
+                 plays: [(.west, [c(.spades, .seven)])],
+                 turn: .north)
+        setHand(s, .north,
+                [c(.spades, .ten), c(.spades, .three),
+                 c(.hearts, .ace), c(.clubs, .ace), c(.diamonds, .ace),
+                 c(.hearts, .king), c(.clubs, .king), c(.diamonds, .king),
+                 c(.hearts, .queen), c(.clubs, .queen), c(.diamonds, .queen)])
+
+        let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
+        XCTAssertEqual(chosen.count, 1)
+        XCTAssertEqual(chosen[0].pointValue, 0,
+                       "P2 吊主未知墩不应裸出主分牌，chosen=\(chosen.map { $0.shortDisplay })")
+        XCTAssertEqual(chosen[0].rank, .three,
+                       "应出可用的无分小主，chosen=\(chosen.map { $0.shortDisplay })")
+    }
+
+    // 开局主牌很多也不应直接领对王；拔主应先用低成本小主，保留最高控制对。
+    func testEarlyLeadPreservesJokerPairWhenLowTrumpTransferExists() {
+        let s = makeState()
+        s.currentTrick = Trick(leadPosition: .north)
+        s.currentLeader = .north
+        s.currentTurn = .north
+        setHand(s, .north,
+                [c(nil, .bigJoker), c(nil, .bigJoker),
+                 c(.spades, .three), c(.spades, .four), c(.spades, .six),
+                 c(.spades, .seven), c(.spades, .eight), c(.spades, .nine),
+                 c(.hearts, .three), c(.clubs, .four), c(.diamonds, .six)])
+
+        let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
+        XCTAssertEqual(chosen.map { $0.shortDisplay }, ["♠3"],
+                       "开局不应直接领对王，chosen=\(chosen.map { $0.shortDisplay })")
+    }
+
+    // 开局也不应直接领对级牌；即便主牌很长，级牌对仍是后续控墩资源。
+    func testEarlyLeadPreservesLevelPairWhenLowTrumpTransferExists() {
+        let s = makeState()
+        s.currentTrick = Trick(leadPosition: .north)
+        s.currentLeader = .north
+        s.currentTurn = .north
+        setHand(s, .north,
+                [c(.hearts, .two), c(.hearts, .two),
+                 c(.spades, .three), c(.spades, .four), c(.spades, .six),
+                 c(.spades, .seven), c(.spades, .eight), c(.spades, .nine),
+                 c(.hearts, .three), c(.clubs, .four), c(.diamonds, .six)])
+
+        let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
+        XCTAssertEqual(chosen.map { $0.shortDisplay }, ["♠3"],
+                       "开局不应直接领对级牌，chosen=\(chosen.map { $0.shortDisplay })")
+    }
+
+    // 多张跟牌时，本门不够且只剩分牌：本门分牌被迫要出，但其他门补牌不能再给对手垫分。
+    func testPartialFollowDoesNotPadEnemyWithOffSuitPoints() {
+        let s = makeState()
+        s.completedTricks = [enemiesVoidClubsTrick()]
+        setTrick(s, lead: .south,
+                 plays: [(.south, [c(.hearts, .seven), c(.hearts, .seven)])],
+                 turn: .west)
+        setHand(s, .west, [c(.hearts, .king), c(.clubs, .ten), c(.diamonds, .three)])
+
+        let chosen = AIPlayer.chooseCards(position: .west, state: s, evaluator: eval)
+        XCTAssertEqual(chosen.count, 2)
+        XCTAssertTrue(chosen.contains { $0.suit == .hearts && $0.rank == .king },
+                      "本门剩余♥K 是被迫跟出的分牌，chosen=\(chosen.map { $0.shortDisplay })")
+        XCTAssertTrue(chosen.contains { $0.suit == .diamonds && $0.rank == .three },
+                      "补其他门时应选0分♦3，不应垫♣10给对手，chosen=\(chosen.map { $0.shortDisplay })")
+        XCTAssertFalse(chosen.contains { $0.suit == .clubs && $0.rank == .ten },
+                       "其他门分牌不是被迫牌，不应额外垫给对手，chosen=\(chosen.map { $0.shortDisplay })")
     }
 
     // Test 2b：无分但我是本队最后行动者且后手有对手 → 仍进入 Point Denial（阻止对手用分牌赢墩）。
