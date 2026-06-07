@@ -1,5 +1,83 @@
 import XCTest
+import SwiftUI
+import UIKit
 @testable import Tractor_Game
+
+/// Renders a realistic dark-mode hand row to a bitmap on the simulator and measures
+/// each card's visible height, so card-size issues are verified empirically.
+/// This reproduces the real bug context (dark mode: card body is black, distinct from
+/// the green table) — a plain self-size render does NOT catch it.
+final class CardViewLayoutTests: XCTestCase {
+
+    private let scale: CGFloat = 1.2
+    private let renderScale: CGFloat = 2
+
+    /// Per-card visible height (points) in a real hand-row layout, keyed by sample x.
+    @MainActor
+    private func cardHeights(_ cards: [Card]) -> [CGFloat] {
+        let s = scale
+        let row = HStack(spacing: -(64 * s * 0.45)) {
+            ForEach(Array(cards.enumerated()), id: \.offset) { _, c in
+                CardView(card: c, sizeScale: s)
+            }
+        }
+        .padding(20)
+        .background(Color(red: 0.10, green: 0.45, blue: 0.20))   // table green
+        .environment(\.colorScheme, .dark)                        // game runs dark
+
+        let renderer = ImageRenderer(content: row)
+        renderer.scale = renderScale
+        guard let ui = renderer.uiImage, let cg = ui.cgImage else { return [] }
+        let w = cg.width, h = cg.height
+        var data = [UInt8](repeating: 0, count: w * h * 4)
+        guard let ctx = CGContext(
+            data: &data, width: w, height: h, bitsPerComponent: 8,
+            bytesPerRow: w * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return [] }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        func isGreen(_ x: Int, _ y: Int) -> Bool {
+            let i = (y * w + x) * 4
+            return abs(Int(data[i]) - 25) < 45 && abs(Int(data[i+1]) - 115) < 50 && abs(Int(data[i+2]) - 51) < 45
+        }
+        // sample a column at the centre of each card and measure non-green vertical extent
+        let n = cards.count
+        var heights: [CGFloat] = []
+        for idx in 0..<n {
+            // centre x of card idx in the rendered image (points → pixels)
+            let frac = (Double(idx) + 0.5) / Double(n)
+            let x = min(w - 1, max(0, Int(Double(w) * (0.12 + 0.76 * frac))))
+            var minY = h, maxY = -1
+            for y in 0..<h where !isGreen(x, y) {
+                if y < minY { minY = y }; if y > maxY { maxY = y }
+            }
+            heights.append(maxY >= minY ? CGFloat(maxY - minY + 1) / renderScale : 0)
+        }
+        return heights
+    }
+
+    @MainActor
+    func testJokerCardSameHeightAsVectorCardInHand() {
+        // small joker | 2♥ | K♠ | A♥ | big joker
+        let cards: [Card] = [
+            Card(suit: nil, rank: .smallJoker),
+            Card(suit: .hearts, rank: .two),
+            Card(suit: .spades, rank: .king),
+            Card(suit: .hearts, rank: .ace),
+            Card(suit: nil, rank: .bigJoker),
+        ]
+        let heights = cardHeights(cards)
+        print("CARD HEIGHTS (pt): \(heights)")
+        guard heights.count == cards.count else { XCTFail("render failed: \(heights)"); return }
+
+        // reference = a vector card (2♥)
+        let vectorH = heights[1]
+        XCTAssertGreaterThan(vectorH, 60, "vector card height looks wrong: \(vectorH)")
+        XCTAssertEqual(heights[0], vectorH, accuracy: 6, "small joker height != vector")
+        XCTAssertEqual(heights[4], vectorH, accuracy: 6, "big joker height != vector")
+    }
+}
 
 /// 战术模式 / 阻分（Point Denial）的 XCTest 用例。
 /// 复用与 AITests/main.swift（独立 swiftc 跑测）相同的场景，验证 Monte Carlo 在
