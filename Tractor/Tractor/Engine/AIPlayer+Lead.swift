@@ -488,7 +488,7 @@ extension AIPlayer {
               ctx.isVoid(partner, key: suit.rawValue) else {
             return 0
         }
-        return Double(ctx.unplayedSuitPoints(suit: suit, tr: tr)) / 10.0
+        return Double(ctx.unplayedSuitPoints(suit: suit, tr: tr)) / 3.0
     }
 
 

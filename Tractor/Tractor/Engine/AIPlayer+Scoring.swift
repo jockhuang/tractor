@@ -571,6 +571,181 @@ extension AIPlayer {
     }
 
 
+    static func isSecondHandTrumpPull(
+        leadCards: [Card],
+        position: PlayerPosition,
+        state: GameState,
+        evaluator: TrickEvaluator,
+        ctx: AIContext
+    ) -> Bool {
+        guard evaluator.dominantSuit(of: leadCards) == nil,
+              state.currentTrick.plays.count == 1 else { return false }
+        return unplayedSubsequentPositions(after: position, in: state)
+            .contains { $0.team != position.team && !ctx.isVoid($0, key: "TRUMP") }
+    }
+
+
+    /// P2 跟吊主时的出牌权需求。这里度量的是"赢下本墩后是否有东西可兑现"，
+    /// 不是主牌强度本身：副牌 A、已知最大副牌、安全甩牌、强结构、长套和待兑现分牌都会提高需求。
+    static func leadControlNeed(
+        position: PlayerPosition,
+        hand: [Card],
+        state: GameState,
+        ctx: AIContext
+    ) -> Double {
+        let ts = state.trumpSuit
+        let tr = state.trumpRank
+        let sideCards = hand.filter { !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr) }
+
+        let cashableSideAces = sideCards.filter { card in
+            card.rank == .ace
+                && (card.suit.map { !ctx.allEnemiesVoid(myTeam: position.team, key: $0.rawValue) } ?? false)
+        }.count
+
+        let knownSideWinners = sideCards.filter {
+            $0.rank != .ace && ctx.isEffectivelyBiggest($0, ts: ts, tr: tr)
+        }.count
+
+        let slamCount = findSlamLeadCandidates(
+            in: hand,
+            ts: ts,
+            tr: tr,
+            myTeam: position.team,
+            ctx: ctx
+        ).count
+
+        let strongPairs = pairs(in: hand, trumpSuit: ts, trumpRank: tr).filter { pair in
+            guard let rep = pairRepresentative(of: pair, trumpSuit: ts, trumpRank: tr) else { return false }
+            if CardComparator.isTrump(rep, trumpSuit: ts, trumpRank: tr) {
+                return isBigTrump(rep, ts: ts, tr: tr)
+            }
+            return isStrongPairAsset(rep, ts: ts, tr: tr)
+                || isEffectivelyBiggestPair(rep, hand: hand, ctx: ctx, ts: ts, tr: tr)
+        }.count
+
+        var tractorCount = 0
+        for suit in Set(hand.map { CardComparator.logicalSuit($0, trumpSuit: ts, trumpRank: tr) }) {
+            let suitCards = hand.filter { CardComparator.logicalSuit($0, trumpSuit: ts, trumpRank: tr) == suit }
+            tractorCount += tractors(in: suitCards, pairCount: 2, trumpSuit: ts, trumpRank: tr).count
+        }
+
+        let longSuitPotential = Suit.allCases.reduce(0.0) { partial, suit in
+            let count = sideCards.filter { $0.suit == suit }.count
+            if count >= 6 { return partial + 2.0 }
+            if count >= 4 { return partial + 1.0 }
+            return partial
+        }
+
+        let pendingPointAssets = Double(sideCards.reduce(0) { $0 + $1.pointValue }) / 10.0
+
+        return Double(cashableSideAces)
+            + Double(knownSideWinners)
+            + Double(slamCount) * 2.0
+            + Double(strongPairs) * 1.5
+            + Double(tractorCount) * 2.0
+            + longSuitPotential
+            + pendingPointAssets
+    }
+
+
+    static func secondHandTrumpWinConfidence(
+        _ move: AIMove,
+        hand: [Card],
+        position: PlayerPosition,
+        state: GameState,
+        evaluator: TrickEvaluator,
+        ctx: AIContext
+    ) -> Double {
+        guard candidateWinsTrick(move.cards, position: position, state: state, evaluator: evaluator) else {
+            return 0
+        }
+        if isSecureWinningTrumpFollow(
+            move.cards,
+            position: position,
+            hand: hand,
+            state: state,
+            evaluator: evaluator,
+            ctx: ctx
+        ) {
+            return 1
+        }
+        let opponentCapture = opponentTrickWinProbability(
+            move, hand: hand, position: position, state: state, evaluator: evaluator, ctx: ctx
+        )
+        let highTrump = move.cards
+            .filter { CardComparator.isTrump($0, trumpSuit: state.trumpSuit, trumpRank: state.trumpRank) }
+            .max {
+                CardComparator.beats($1, $0, trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
+            }
+        let strength = highTrump.map {
+            trumpStrengthFraction($0, ts: state.trumpSuit, tr: state.trumpRank)
+        } ?? 0
+        return min(1.0, max(0.0, 1.0 - opponentCapture + strength * 0.25))
+    }
+
+
+    static func secondHandTrumpPointExposureRisk(
+        _ move: AIMove,
+        hand: [Card],
+        position: PlayerPosition,
+        state: GameState,
+        evaluator: TrickEvaluator,
+        ctx: AIContext
+    ) -> Double {
+        let playedPoints = move.cards.reduce(0) { $0 + $1.pointValue }
+        guard playedPoints > 0 else { return 0 }
+        return opponentTrickWinProbability(
+            move, hand: hand, position: position, state: state, evaluator: evaluator, ctx: ctx
+        )
+    }
+
+
+    static func secondHandTrumpControlAdjustment(
+        _ move: AIMove,
+        leadCards: [Card],
+        hand: [Card],
+        position: PlayerPosition,
+        state: GameState,
+        evaluator: TrickEvaluator,
+        ctx: AIContext,
+        cost: Double
+    ) -> Double {
+        guard isSecondHandTrumpPull(
+            leadCards: leadCards,
+            position: position,
+            state: state,
+            evaluator: evaluator,
+            ctx: ctx
+        ) else { return 0 }
+
+        let playedPoints = move.cards.reduce(0) { $0 + $1.pointValue }
+        let exposureRisk = secondHandTrumpPointExposureRisk(
+            move, hand: hand, position: position, state: state, evaluator: evaluator, ctx: ctx
+        )
+        if playedPoints > 0 && exposureRisk > 0.05 {
+            return -140 - Double(playedPoints) * 8 - exposureRisk * 80
+        }
+
+        let wins = candidateWinsTrick(move.cards, position: position, state: state, evaluator: evaluator)
+        let need = leadControlNeed(position: position, hand: hand, state: state, ctx: ctx)
+        let winConfidence = secondHandTrumpWinConfidence(
+            move, hand: hand, position: position, state: state, evaluator: evaluator, ctx: ctx
+        )
+        let breakPenalty = structureBreakPenalty(cards: move.cards, hand: hand, ts: state.trumpSuit, tr: state.trumpRank)
+        var score = -breakPenalty * 55
+
+        if wins && need >= 5.0 && winConfidence >= 0.62 && exposureRisk <= 0.20 && breakPenalty == 0 {
+            score += need * 9.0 + winConfidence * 34.0 - cost * 1.2
+            if playedPoints == 0 { score += 16 }
+            if containsBigTrump(move.cards, ts: state.trumpSuit, tr: state.trumpRank) { score += 6 }
+        } else if playedPoints == 0 && containsBigTrump(move.cards, ts: state.trumpSuit, tr: state.trumpRank) {
+            score -= 38 + cost * 2.0
+        }
+
+        return score
+    }
+
+
     // MARK: - 统一「用主控墩」决策（Trump Control Decision）
 
     /// 核心问题：为「拿到 / 保住 / 抢回」这一墩的控制权，值不值得花这张主牌？
@@ -635,6 +810,16 @@ extension AIPlayer {
         let costDamp = trumpCostDamping(trickPoints: totalPoints)
         // 抢回出牌权的价值：赢下后手上还有多少可兑现的资产（旁门A、对子/连对、甩牌、长门…）
         let leadControl = trumpLeadControlValue(move: move, hand: hand, position: position, state: state, ctx: ctx)
+        let secondHandAdjustment = secondHandTrumpControlAdjustment(
+            move,
+            leadCards: leadCards,
+            hand: hand,
+            position: position,
+            state: state,
+            evaluator: evaluator,
+            ctx: ctx,
+            cost: cost
+        )
 
         var score = 0.0
         let classification: TrumpControlClass
@@ -687,6 +872,7 @@ extension AIPlayer {
                 }
             }
         }
+        score += secondHandAdjustment
         return TrumpControlDecision(
             classification: classification,
             score: score,
@@ -902,6 +1088,221 @@ extension AIPlayer {
             return cost
         } + structureBreakPenalty(cards: cards, hand: hand, ts: ts, tr: tr) * 20
             + strongStructureBreakPenalty(cards: cards, hand: hand, ts: ts, tr: tr) * 24
+    }
+
+
+    /// Cost of discarding a single card. Higher means "preserve this card".
+    /// Point cards are not automatically protected: their value is immediate risk + future realization - future loss risk.
+    static func discardCost(
+        card: Card,
+        hand: [Card],
+        gameState: GameState,
+        trickContext: TrickContext
+    ) -> Double {
+        let ts = trickContext.trumpSuit
+        let tr = trickContext.trumpRank
+        let point = Double(card.pointValue)
+
+        var cost = 0.0
+        cost += discardControlAssetValue(card, hand: hand, state: gameState, ctx: trickContext.memory)
+        cost += discardStructureIntegrityValue(card: card, hand: hand, ts: ts, tr: tr)
+
+        if point > 0 {
+            var immediateRisk = point * immediatePointDiscardRiskMultiplier(
+                card: card,
+                gameState: gameState,
+                trickContext: trickContext
+            )
+            if discardPointCardWouldLetOpponentReachCriticalScore(
+                card: card,
+                gameState: gameState,
+                trickContext: trickContext
+            ) {
+                immediateRisk += 240 + point * 12
+            }
+
+            let futureRealization = futurePointRealizationValue(
+                card: card,
+                hand: hand,
+                state: gameState,
+                ctx: trickContext.memory
+            )
+            let futureLoss = futurePointLossRisk(
+                card: card,
+                hand: hand,
+                state: gameState,
+                position: trickContext.position,
+                ctx: trickContext.memory
+            )
+            var pointCost = immediateRisk + futureRealization - futureLoss
+            if trickContext.opponentWinning {
+                pointCost = max(pointCost, point * 2.0)
+            }
+            cost += pointCost
+        }
+
+        if !CardComparator.isTrump(card, trumpSuit: ts, trumpRank: tr),
+           let suit = card.suit,
+           trickContext.memory.allEnemiesVoid(myTeam: trickContext.position.team, key: suit.rawValue),
+           !(trickContext.opponentWinning && card.pointValue > 0) {
+            cost -= card.pointValue > 0 ? 18 : 6
+        }
+
+        return cost
+    }
+
+
+    static func immediatePointDiscardRiskMultiplier(
+        card: Card,
+        gameState: GameState,
+        trickContext: TrickContext
+    ) -> Double {
+        guard card.pointValue > 0 else { return 0 }
+        if trickContext.opponentWinning { return 5.0 }
+        if trickContext.partnerWinning {
+            return isTrickSecureForTeam(
+                position: trickContext.position,
+                hand: trickContext.hand,
+                state: gameState,
+                evaluator: trickContext.evaluator,
+                ctx: trickContext.memory
+            ) ? -2.0 : 1.5
+        }
+        return 1.0
+    }
+
+
+    static func discardControlAssetValue(
+        _ card: Card,
+        hand: [Card],
+        state: GameState,
+        ctx: AIContext
+    ) -> Double {
+        let ts = state.trumpSuit
+        let tr = state.trumpRank
+        guard CardComparator.isTrump(card, trumpSuit: ts, trumpRank: tr) else {
+            if card.rank == .ace || ctx.isEffectivelyBiggest(card, ts: ts, tr: tr) { return 55 }
+            return 0
+        }
+
+        if card.rank == .bigJoker { return 280 }
+        if card.rank == .smallJoker { return 235 }
+        if card.rank == tr { return 190 }
+        if isBigTrump(card, ts: ts, tr: tr) { return 150 }
+        return 45 + Double(CardComparator.trumpWeight(card, trumpSuit: ts, trumpRank: tr)) * 2.0
+    }
+
+
+    static func discardStructureIntegrityValue(card: Card, hand: [Card], ts: Suit?, tr: Rank) -> Double {
+        var value = 0.0
+        value += structureBreakPenalty(cards: [card], hand: hand, ts: ts, tr: tr) * 55
+        value += strongStructureBreakPenalty(cards: [card], hand: hand, ts: ts, tr: tr) * 70
+
+        let pair = pairContaining(card, in: hand, ts: ts, tr: tr)
+        if let rep = pairRepresentative(of: pair, trumpSuit: ts, trumpRank: tr) {
+            if rep.rank == tr || rep.rank == .bigJoker || rep.rank == .smallJoker { value += 90 }
+            else if CardComparator.isTrump(rep, trumpSuit: ts, trumpRank: tr) { value += 65 }
+            else if rep.rank == .ace { value += 55 }
+            else if rep.pointValue > 0 { value += 30 }
+        }
+
+        if isMixedSlamCore(card, hand: hand, ts: ts, tr: tr) { value += 70 }
+        return value
+    }
+
+
+    static func pairContaining(_ card: Card, in hand: [Card], ts: Suit?, tr: Rank) -> [Card] {
+        let key = CardComparator.pairKey(card, trumpSuit: ts, trumpRank: tr)
+        return Array(hand.filter { CardComparator.pairKey($0, trumpSuit: ts, trumpRank: tr) == key }.prefix(2))
+    }
+
+
+    static func isMixedSlamCore(_ card: Card, hand: [Card], ts: Suit?, tr: Rank) -> Bool {
+        guard !CardComparator.isTrump(card, trumpSuit: ts, trumpRank: tr),
+              let suit = card.suit else { return false }
+        let suitCards = hand.filter {
+            $0.suit == suit && !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
+        }
+        let hasAce = suitCards.contains { $0.rank == .ace }
+        let hasKingPair = pairs(in: suitCards, trumpSuit: ts, trumpRank: tr).contains {
+            pairRepresentative(of: $0, trumpSuit: ts, trumpRank: tr)?.rank == .king
+        }
+        return hasAce && hasKingPair && (card.rank == .ace || card.rank == .king)
+    }
+
+
+    static func futurePointRealizationValue(
+        card: Card,
+        hand: [Card],
+        state: GameState,
+        ctx: AIContext
+    ) -> Double {
+        guard card.pointValue > 0 else { return 0 }
+        let ts = state.trumpSuit
+        let tr = state.trumpRank
+        let point = Double(card.pointValue)
+
+        if CardComparator.isTrump(card, trumpSuit: ts, trumpRank: tr) {
+            if isBigTrump(card, ts: ts, tr: tr) { return point * 4 }
+            return point * 1.2
+        }
+
+        guard let suit = card.suit else { return 0 }
+        let suitCards = hand.filter {
+            $0.suit == suit && !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
+        }
+        let hasAce = suitCards.contains { $0.rank == .ace }
+        let paired = pairContaining(card, in: hand, ts: ts, tr: tr).count >= 2
+        let protectedStructure = hasAce || paired || isMixedSlamCore(card, hand: hand, ts: ts, tr: tr)
+        if ctx.isEffectivelyBiggest(card, ts: ts, tr: tr) || protectedStructure {
+            return point * (paired ? 4.0 : 2.8)
+        }
+        return 0
+    }
+
+
+    static func futurePointLossRisk(
+        card: Card,
+        hand: [Card],
+        state: GameState,
+        position: PlayerPosition,
+        ctx: AIContext
+    ) -> Double {
+        guard card.pointValue > 0 else { return 0 }
+        let ts = state.trumpSuit
+        let tr = state.trumpRank
+        let point = Double(card.pointValue)
+
+        if CardComparator.isTrump(card, trumpSuit: ts, trumpRank: tr) {
+            return isBigTrump(card, ts: ts, tr: tr) ? 0 : point * 0.8
+        }
+
+        guard let suit = card.suit else { return 0 }
+        let paired = pairContaining(card, in: hand, ts: ts, tr: tr).count >= 2
+        let enemyVoidCount = ctx.voidEnemies(myTeam: position.team, key: suit.rawValue).count
+        var risk = point * (paired ? 0.8 : 3.0)
+        if enemyVoidCount > 0 { risk += point * Double(enemyVoidCount) * 1.2 }
+        if suitAwaitingTrumpPull(suit, position: position, hand: hand, state: state, ctx: ctx) {
+            risk += point * 1.5
+        }
+        return risk
+    }
+
+
+    static func discardPointCardWouldLetOpponentReachCriticalScore(
+        card: Card,
+        gameState: GameState,
+        trickContext: TrickContext
+    ) -> Bool {
+        guard card.pointValue > 0,
+              trickContext.opponentWinning,
+              let winner = trickContext.currentWinner,
+              winner.team != gameState.dealerTeamIdx else { return false }
+
+        let projected = gameState.attackScore + trickContext.trickPoints + card.pointValue
+        return stride(from: 40, through: 240, by: 40).contains {
+            gameState.attackScore < $0 && projected >= $0
+        }
     }
 
 

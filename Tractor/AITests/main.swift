@@ -92,6 +92,42 @@ do {
           "chosen=\(chosen.map { $0.shortDisplay })")
 }
 
+// ── Test 2a.0a：P2 跟吊主限制的是分牌暴露，不是大主强度；高主动权需求可用无分主A抢出牌权 ──
+do {
+    let s = makeState(trump: ts, rank: tr)
+    setTrick(s, lead: .west,
+             plays: [(.west, [c(.spades, .seven)])],
+             turn: .north)
+    s.players[PlayerPosition.north.rawValue].hand =
+        [c(.spades, .ace), c(.spades, .three),
+         c(.hearts, .ace), c(.clubs, .ace), c(.diamonds, .ace),
+         c(.hearts, .king), c(.hearts, .king),
+         c(.clubs, .queen), c(.clubs, .queen),
+         c(.diamonds, .jack), c(.diamonds, .jack)]
+    let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
+    check(chosen.map { $0.shortDisplay } == ["♠A"],
+          "Test2a.0a P2高主动权需求可用无分控制主抢出牌权",
+          "chosen=\(chosen.map { $0.shortDisplay })")
+}
+
+// ── Test 2a.0b：同样需要主动权时，主K仍因 Point Exposure 被压下去 ──
+do {
+    let s = makeState(trump: ts, rank: tr)
+    setTrick(s, lead: .west,
+             plays: [(.west, [c(.spades, .seven)])],
+             turn: .north)
+    s.players[PlayerPosition.north.rawValue].hand =
+        [c(.spades, .king), c(.spades, .three),
+         c(.hearts, .ace), c(.clubs, .ace), c(.diamonds, .ace),
+         c(.hearts, .king), c(.hearts, .king),
+         c(.clubs, .queen), c(.clubs, .queen),
+         c(.diamonds, .jack), c(.diamonds, .jack)]
+    let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
+    check(chosen.map { $0.shortDisplay } == ["♠3"],
+          "Test2a.0b P2不把主K送进后手对手可能赢的0分墩",
+          "chosen=\(chosen.map { $0.shortDisplay })")
+}
+
 // ── Test 2a.1：开局主牌多也不直接领对王 ──
 do {
     let s = makeState(trump: ts, rank: tr)
@@ -141,6 +177,60 @@ do {
     let avoidsOffSuitPoint = !chosen.contains { $0.suit == .clubs && $0.rank == .ten }
     check(chosen.count == 2 && forcedPoint && usesSafeFill && avoidsOffSuitPoint,
           "Test2a.3 本门分牌被迫出，其他门补0分牌不垫分",
+          "chosen=\(chosen.map { $0.shortDisplay })")
+}
+
+// ── Test 2a.4：非临界分线，孤立分牌不能压过王/级牌控制资产 ──
+do {
+    let s = makeState(trump: ts, rank: tr, dealerTeam: 0)
+    s.attackScore = 0
+    setTrick(s, lead: .west,
+             plays: [(.west, [c(.hearts, .seven), c(.hearts, .seven)])],
+             turn: .north)
+    let hand = [c(nil, .bigJoker), c(.hearts, .two), c(.clubs, .king), c(.diamonds, .three)]
+    s.players[PlayerPosition.north.rawValue].hand = hand
+    let ctx = AIContext.build(state: s, ts: ts, tr: tr)
+    let chosen = AIPlayer.smartDiscard(from: hand, count: 2,
+                                       enemyWinning: true,
+                                       ts: ts, tr: tr,
+                                       myTeam: PlayerPosition.north.team,
+                                       ctx: ctx,
+                                       state: s,
+                                       position: .north,
+                                       evaluator: eval,
+                                       fullHand: hand)
+    let dropsSmallSide = chosen.contains { $0.suit == .diamonds && $0.rank == .three }
+    let dropsPoint = chosen.contains { $0.suit == .clubs && $0.rank == .king }
+    let preservesControl = !chosen.contains { $0.rank == .bigJoker || $0.rank == tr }
+    check(chosen.count == 2 && dropsSmallSide && dropsPoint && preservesControl,
+          "Test2a.4 非临界分线：垫孤立K，不丢王/级牌保K",
+          "chosen=\(chosen.map { $0.shortDisplay })")
+}
+
+// ── Test 2a.5：临界分线，只有此时才提升分牌保护权重 ──
+do {
+    let s = makeState(trump: ts, rank: tr, dealerTeam: 0)
+    s.attackScore = 30
+    setTrick(s, lead: .west,
+             plays: [(.west, [c(.hearts, .seven), c(.hearts, .seven)])],
+             turn: .north)
+    let hand = [c(nil, .bigJoker), c(.hearts, .two), c(.clubs, .king), c(.diamonds, .three)]
+    s.players[PlayerPosition.north.rawValue].hand = hand
+    let ctx = AIContext.build(state: s, ts: ts, tr: tr)
+    let chosen = AIPlayer.smartDiscard(from: hand, count: 2,
+                                       enemyWinning: true,
+                                       ts: ts, tr: tr,
+                                       myTeam: PlayerPosition.north.team,
+                                       ctx: ctx,
+                                       state: s,
+                                       position: .north,
+                                       evaluator: eval,
+                                       fullHand: hand)
+    let dropsSmallSide = chosen.contains { $0.suit == .diamonds && $0.rank == .three }
+    let protectsPoint = !chosen.contains { $0.suit == .clubs && $0.rank == .king }
+    let preservesBigJoker = !chosen.contains { $0.rank == .bigJoker }
+    check(chosen.count == 2 && dropsSmallSide && protectsPoint && preservesBigJoker,
+          "Test2a.5 临界分线：临时保护K，但仍保最高控制大王",
           "chosen=\(chosen.map { $0.shortDisplay })")
 }
 
@@ -284,6 +374,32 @@ do {
     let chosen2 = AIPlayer.chooseCards(position: .south, state: s2, evaluator: eval)
     check(chosen2.map { $0.shortDisplay } == ["♥A"], "Test8 无威胁 → 直接兑现♥A",
           "chosen=\(chosen2.map { $0.shortDisplay })")
+}
+
+// ── Test 9：队友已绝某副牌且该门仍有分未出 → 优先引出该门，不被小主过渡抢走 ──
+func southVoidHeartsTrick() -> Trick {
+    var t = Trick(leadPosition: .west)
+    t.plays.append((position: .west, cards: [c(.hearts, .seven)]))
+    t.plays.append((position: .north, cards: [c(.hearts, .eight)]))
+    t.plays.append((position: .east, cards: [c(.hearts, .nine)]))
+    t.plays.append((position: .south, cards: [c(.clubs, .three)]))
+    return t
+}
+do {
+    let s = makeState(trump: ts, rank: tr)
+    s.completedTricks = [southVoidHeartsTrick()]
+    s.currentTrick = Trick(leadPosition: .north)
+    s.currentLeader = .north
+    s.currentTurn = .north
+    s.players[PlayerPosition.north.rawValue].hand =
+        [c(.hearts, .four),
+         c(.spades, .three), c(.spades, .four), c(.spades, .six),
+         c(.clubs, .four), c(.diamonds, .six), c(.clubs, .seven)]
+
+    let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
+    check(chosen.map { $0.shortDisplay } == ["♥4"],
+          "Test9 队友绝红桃且红桃有分未出 → 领红桃引队友垫分",
+          "chosen=\(chosen.map { $0.shortDisplay })")
 }
 
 print(String(repeating: "─", count: 40))

@@ -127,7 +127,8 @@ extension AIPlayer {
                 chosen += smartDiscard(
                     from: rest, count: count - chosen.count,
                     enemyWinning: true, ts: ts, tr: tr,
-                    myTeam: position.team, ctx: ctx
+                    myTeam: position.team, ctx: ctx,
+                    state: state, position: position, evaluator: evaluator, fullHand: hand
                 )
             }
             return Array(chosen.prefix(count))
@@ -164,6 +165,8 @@ extension AIPlayer {
                 trumpRank: tr,
                 position: position,
                 leadSuit: leadSuit,
+                state: state,
+                evaluator: evaluator,
                 ctx: ctx,
                 trickSecure: trickSecureForTeam
             )
@@ -181,6 +184,8 @@ extension AIPlayer {
                 position: position,
                 leadSuit: leadSuit,
                 trickPoints: trickPoints,
+                state: state,
+                evaluator: evaluator,
                 ctx: ctx,
                 trickSecure: trickSecureForTeam
             )
@@ -194,6 +199,7 @@ extension AIPlayer {
                 suitCards: suitCards, hand: hand,
                 position: position, count: count,
                 ts: ts, tr: tr, ctx: ctx,
+                state: state, evaluator: evaluator,
                 trickSecure: trickSecureForTeam
             )
         }
@@ -413,7 +419,8 @@ extension AIPlayer {
                             chosen += smartDiscard(
                                 from: extra, count: remaining,
                                 enemyWinning: true,
-                                ts: ts, tr: tr, myTeam: position.team, ctx: ctx
+                                ts: ts, tr: tr, myTeam: position.team, ctx: ctx,
+                                state: state, position: position, evaluator: evaluator, fullHand: hand
                             )
                             return Array(chosen.prefix(count))
                         }
@@ -426,7 +433,8 @@ extension AIPlayer {
                             chosen += smartDiscard(
                                 from: rest, count: count - chosen.count,
                                 enemyWinning: false,   // 我方已压住，按队友赢策略垫分
-                                ts: ts, tr: tr, myTeam: position.team, ctx: ctx
+                                ts: ts, tr: tr, myTeam: position.team, ctx: ctx,
+                                state: state, position: position, evaluator: evaluator, fullHand: hand
                             )
                         }
                         return Array(chosen.prefix(count))
@@ -437,7 +445,8 @@ extension AIPlayer {
                         chosen += smartDiscard(
                             from: extra, count: remaining,
                             enemyWinning: true,
-                            ts: ts, tr: tr, myTeam: position.team, ctx: ctx
+                            ts: ts, tr: tr, myTeam: position.team, ctx: ctx,
+                            state: state, position: position, evaluator: evaluator, fullHand: hand
                         )
                         return Array(chosen.prefix(count))
                     }
@@ -538,7 +547,11 @@ extension AIPlayer {
                     ts: ts,
                     tr: tr,
                     myTeam: position.team,
-                    ctx: ctx
+                    ctx: ctx,
+                    state: state,
+                    position: position,
+                    evaluator: evaluator,
+                    fullHand: hand
                 )
             }
             return Array(result.prefix(remaining))
@@ -585,7 +598,8 @@ extension AIPlayer {
                         result += smartDiscard(
                             from: rest, count: remaining - result.count,
                             enemyWinning: false,
-                            ts: ts, tr: tr, myTeam: position.team, ctx: ctx
+                            ts: ts, tr: tr, myTeam: position.team, ctx: ctx,
+                            state: state, position: position, evaluator: evaluator, fullHand: hand
                         )
                     }
                     return Array(result.prefix(remaining))
@@ -594,7 +608,8 @@ extension AIPlayer {
                 return smartDiscard(
                     from: extra, count: remaining,
                     enemyWinning: true,
-                    ts: ts, tr: tr, myTeam: position.team, ctx: ctx
+                    ts: ts, tr: tr, myTeam: position.team, ctx: ctx,
+                    state: state, position: position, evaluator: evaluator, fullHand: hand
                 )
             }
 
@@ -612,7 +627,8 @@ extension AIPlayer {
                     count: remaining,
                     enemyWinning: true,   // 视同对方可能截胡，避免垫分牌
                     ts: ts, tr: tr,
-                    myTeam: position.team, ctx: ctx
+                    myTeam: position.team, ctx: ctx,
+                    state: state, position: position, evaluator: evaluator, fullHand: hand
                 )
             }
             return trickSecure
@@ -621,7 +637,8 @@ extension AIPlayer {
                     from: extra, count: remaining,
                     enemyWinning: true,
                     ts: ts, tr: tr,
-                    myTeam: position.team, ctx: ctx
+                    myTeam: position.team, ctx: ctx,
+                    state: state, position: position, evaluator: evaluator, fullHand: hand
                 )
         }
 
@@ -652,7 +669,8 @@ extension AIPlayer {
                             result += smartDiscard(
                                 from: rest, count: remaining - result.count,
                                 enemyWinning: true, ts: ts, tr: tr,
-                                myTeam: position.team, ctx: ctx
+                                myTeam: position.team, ctx: ctx,
+                                state: state, position: position, evaluator: evaluator, fullHand: hand
                             )
                         }
                         return Array(result.prefix(remaining))
@@ -668,7 +686,8 @@ extension AIPlayer {
                         from: safePool.isEmpty ? extra : safePool,
                         count: remaining,
                         enemyWinning: true, ts: ts, tr: tr,
-                        myTeam: position.team, ctx: ctx
+                        myTeam: position.team, ctx: ctx,
+                        state: state, position: position, evaluator: evaluator, fullHand: hand
                     )
                 }
 
@@ -681,7 +700,8 @@ extension AIPlayer {
                         result += smartDiscard(
                             from: rest, count: remaining - result.count,
                             enemyWinning: true, ts: ts, tr: tr,
-                            myTeam: position.team, ctx: ctx
+                            myTeam: position.team, ctx: ctx,
+                            state: state, position: position, evaluator: evaluator, fullHand: hand
                         )
                     }
                     return Array(result.prefix(remaining))
@@ -694,7 +714,8 @@ extension AIPlayer {
             from: extra, count: remaining,
             enemyWinning: enemyWinning,
             ts: ts, tr: tr,
-            myTeam: position.team, ctx: ctx
+            myTeam: position.team, ctx: ctx,
+            state: state, position: position, evaluator: evaluator, fullHand: hand
         )
     }
 
@@ -712,7 +733,11 @@ extension AIPlayer {
         ts: Suit?,
         tr: Rank,
         myTeam: Int,
-        ctx: AIContext
+        ctx: AIContext,
+        state: GameState? = nil,
+        position: PlayerPosition? = nil,
+        evaluator: TrickEvaluator? = nil,
+        fullHand: [Card]? = nil
     ) -> [Card] {
         guard count > 0, !cards.isEmpty else { return [] }
 
@@ -751,7 +776,21 @@ extension AIPlayer {
 
         if enemyWinning {
             let ordered = cards.sorted { a, b in
-                if a.pointValue != b.pointValue { return a.pointValue < b.pointValue }
+                if let state, let position, let evaluator {
+                    let handForCost = fullHand ?? cards
+                    let trickContext = TrickContext(
+                        position: position,
+                        hand: handForCost,
+                        state: state,
+                        evaluator: evaluator,
+                        memory: ctx
+                    )
+                    let ac = discardCost(card: a, hand: handForCost, gameState: state, trickContext: trickContext)
+                    let bc = discardCost(card: b, hand: handForCost, gameState: state, trickContext: trickContext)
+                    if ac != bc { return ac < bc }
+                } else if a.pointValue != b.pointValue {
+                    return a.pointValue < b.pointValue
+                }
                 let ta = tier(a), tb = tier(b)
                 if ta != tb { return ta < tb }
                 let pa = isPaired(a), pb = isPaired(b)
@@ -823,6 +862,8 @@ extension AIPlayer {
         trumpRank: Rank,
         position: PlayerPosition,
         leadSuit: Suit?,
+        state: GameState,
+        evaluator: TrickEvaluator,
         ctx: AIContext,
         trickSecure: Bool
     ) -> [Card] {
@@ -890,11 +931,13 @@ extension AIPlayer {
                : smartDiscard(from: rest, count: count - suitCards.count,
                               enemyWinning: true,
                               ts: trumpSuit, tr: trumpRank,
-                              myTeam: position.team, ctx: ctx))
+                              myTeam: position.team, ctx: ctx,
+                              state: state, position: position, evaluator: evaluator, fullHand: hand))
             : smartDiscard(from: rest, count: count - suitCards.count,
                            enemyWinning: true,
                            ts: trumpSuit, tr: trumpRank,
-                           myTeam: position.team, ctx: ctx)
+                           myTeam: position.team, ctx: ctx,
+                           state: state, position: position, evaluator: evaluator, fullHand: hand)
         return suitCards + extra
     }
 
@@ -909,6 +952,8 @@ extension AIPlayer {
         position: PlayerPosition,
         leadSuit: Suit?,
         trickPoints: Int,
+        state: GameState,
+        evaluator: TrickEvaluator,
         ctx: AIContext,
         trickSecure: Bool
     ) -> [Card] {
@@ -980,11 +1025,13 @@ extension AIPlayer {
                : smartDiscard(from: rest, count: 2 - suitCards.count,
                               enemyWinning: true,
                               ts: trumpSuit, tr: trumpRank,
-                              myTeam: position.team, ctx: ctx))
+                              myTeam: position.team, ctx: ctx,
+                              state: state, position: position, evaluator: evaluator, fullHand: hand))
             : smartDiscard(from: rest, count: 2 - suitCards.count,
                            enemyWinning: true,
                            ts: trumpSuit, tr: trumpRank,
-                           myTeam: position.team, ctx: ctx)
+                           myTeam: position.team, ctx: ctx,
+                           state: state, position: position, evaluator: evaluator, fullHand: hand)
         return suitCards + extra
     }
 
@@ -1061,7 +1108,8 @@ extension AIPlayer {
             moves.append(AIMove(
                 cards: suitCards + smartDiscard(from: extra, count: remaining,
                                                 enemyWinning: !partnerWinning,
-                                                ts: ts, tr: tr, myTeam: position.team, ctx: ctx),
+                                                ts: ts, tr: tr, myTeam: position.team, ctx: ctx,
+                                                state: state, position: position, evaluator: evaluator, fullHand: hand),
                 kind: partnerWinning ? .followSupport : .followDiscard
             ))
             if partnerWinning && trickSecureForTeam {
@@ -1090,8 +1138,9 @@ extension AIPlayer {
     }
 
 
-    /// P2 跟吊主时，后面仍有未知对手，且本墩还没锁定，不要为了抢出牌权把主分牌裸送进 0 分墩。
-    /// 若没有无分合法牌，或该走法已经能锁定本墩，则不拦。
+    /// P2 跟吊主时，限制对象是 Point Exposure，不是 Trump Strength：
+    /// 后手仍有未知对手且本墩未锁定时，不把主 5/10/K 裸送进 0 分墩；
+    /// 无分大主仍交给 Trump Control / leadControlNeed 评分决定是否值得抢出牌权。
     static func filterUnsafeSecondHandTrumpPointExposure(
         _ moves: [AIMove],
         leadCards: [Card],
@@ -1217,7 +1266,11 @@ extension AIPlayer {
                     ts: ts,
                     tr: tr,
                     myTeam: position.team,
-                    ctx: ctx
+                    ctx: ctx,
+                    state: state,
+                    position: position,
+                    evaluator: evaluator,
+                    fullHand: hand
                 )
                 add(withRequiredSuit([card] + fill))
             }
@@ -1426,11 +1479,22 @@ extension AIPlayer {
         let need = initiativeNeed(position: position, hand: hand, state: state, ctx: ctx)
         guard need >= 100 else { return moves }
 
+        let secondHandTrumpPull = state.currentTrick.leadCards.map {
+            isSecondHandTrumpPull(
+                leadCards: $0,
+                position: position,
+                state: state,
+                evaluator: evaluator,
+                ctx: ctx
+            )
+        } ?? false
+
         let lowCostWinning = moves.filter {
             guard candidateWinsTrick($0.cards, position: position, state: state, evaluator: evaluator),
                   moveCardCost($0.cards, hand: hand, state: state, ctx: ctx) <= 45,
-                  structureBreakPenalty(cards: $0.cards, hand: hand, ts: state.trumpSuit, tr: state.trumpRank) == 0,
-                  !containsBigTrump($0.cards, ts: state.trumpSuit, tr: state.trumpRank) else { return false }
+                  structureBreakPenalty(cards: $0.cards, hand: hand, ts: state.trumpSuit, tr: state.trumpRank) == 0 else {
+                return false
+            }
 
             if $0.cards.contains(where: { CardComparator.isTrump($0, trumpSuit: state.trumpSuit, trumpRank: state.trumpRank) }),
                let leadCards = state.currentTrick.leadCards {
@@ -1443,6 +1507,33 @@ extension AIPlayer {
                     evaluator: evaluator,
                     ctx: ctx
                 ) else { return false }
+                if secondHandTrumpPull {
+                    let playedPoints = $0.cards.reduce(0) { $0 + $1.pointValue }
+                    let exposureRisk = secondHandTrumpPointExposureRisk(
+                        $0,
+                        hand: hand,
+                        position: position,
+                        state: state,
+                        evaluator: evaluator,
+                        ctx: ctx
+                    )
+                    let winConfidence = secondHandTrumpWinConfidence(
+                        $0,
+                        hand: hand,
+                        position: position,
+                        state: state,
+                        evaluator: evaluator,
+                        ctx: ctx
+                    )
+                    return decision.classification != .passiveTrump
+                        && decision.score > 0
+                        && leadControlNeed(position: position, hand: hand, state: state, ctx: ctx) >= 5.0
+                        && winConfidence >= 0.62
+                        && (playedPoints == 0 || exposureRisk <= 0.05)
+                }
+                guard !containsBigTrump($0.cards, ts: state.trumpSuit, tr: state.trumpRank) else {
+                    return false
+                }
                 return decision.classification != .passiveTrump && decision.score > 0
             }
             return true
@@ -1465,6 +1556,8 @@ extension AIPlayer {
         count: Int,
         ts: Suit?, tr: Rank,
         ctx: AIContext,
+        state: GameState,
+        evaluator: TrickEvaluator,
         trickSecure: Bool
     ) -> [Card] {
         // 有足够同花色：按结构优先（连对 > 对子 > 散牌），与跟连对规则一致
@@ -1530,7 +1623,8 @@ extension AIPlayer {
                                trumpSuit: ts, trumpRank: tr, ctx: ctx)
             : smartDiscard(from: nonTrump, count: remaining,
                            enemyWinning: !partnerWinning,
-                           ts: ts, tr: tr, myTeam: position.team, ctx: ctx)
+                           ts: ts, tr: tr, myTeam: position.team, ctx: ctx,
+                           state: state, position: position, evaluator: evaluator, fullHand: hand)
         // 非主牌不够时才补最弱主牌
         if fills.count < remaining {
             let usedIDs2    = Set(fills.map { $0.id })
