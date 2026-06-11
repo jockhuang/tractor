@@ -262,6 +262,21 @@ struct AIPlayer {
         let score: Double
     }
 
+    struct CardCombination {
+        let cards: [Card]
+        let pattern: PlayPattern
+    }
+
+    struct EndgameControlAsset {
+        let combination: CardCombination
+        let winProbability: Double
+        let trickCountCovered: Int
+        let bottomPointCapturePotential: Int
+        let structureBreakCost: Double
+        let isTrumpBased: Bool
+        let isStructureBased: Bool
+    }
+
     static let monteCarloTopMoveCount = 5
     static let monteCarloSimulationCount = 24
 

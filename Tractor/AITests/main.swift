@@ -402,6 +402,70 @@ do {
           "chosen=\(chosen.map { $0.shortDisplay })")
 }
 
+// ── Test 10：Endgame Control Asset Preservation — 主对子 + 副牌垃圾，残局先处理副牌 ──
+do {
+    let s = makeState(trump: ts, rank: tr, dealerTeam: 0)
+    s.currentTrick = Trick(leadPosition: .west)
+    s.currentLeader = .west
+    s.currentTurn = .west
+    s.completedTricks = [
+        {
+            var t = Trick(leadPosition: .south)
+            t.plays.append((position: .south, cards: [c(.spades, .three)]))
+            t.plays.append((position: .west, cards: [c(.spades, .four)]))
+            t.plays.append((position: .north, cards: [c(.hearts, .six)]))
+            t.plays.append((position: .east, cards: [c(.diamonds, .six)]))
+            return t
+        }(),
+        {
+            var t = Trick(leadPosition: .west)
+            t.plays.append((position: .west, cards: [c(.spades, .five)]))
+            t.plays.append((position: .north, cards: [c(.clubs, .three)]))
+            t.plays.append((position: .east, cards: [c(.spades, .six)]))
+            t.plays.append((position: .south, cards: [c(.diamonds, .four)]))
+            return t
+        }()
+    ]
+    s.players[PlayerPosition.west.rawValue].hand =
+        [c(.spades, .ace), c(.spades, .ace), c(.hearts, .three), c(.clubs, .four)]
+    let chosen = AIPlayer.chooseCards(position: .west, state: s, evaluator: eval)
+    check(chosen.count == 1 && !CardComparator.isTrump(chosen[0], trumpSuit: ts, trumpRank: tr),
+          "Test10 残局主对子+副牌垃圾 → 先出副牌保留主对子",
+          "chosen=\(chosen.map { $0.shortDisplay })")
+}
+
+// ── Test 11：Endgame Control Asset Preservation — 主拖拉机 + 副牌，不提前出拖拉机或拆拖拉机 ──
+do {
+    let s = makeState(trump: ts, rank: tr, dealerTeam: 0)
+    s.currentTrick = Trick(leadPosition: .east)
+    s.currentLeader = .east
+    s.currentTurn = .east
+    s.completedTricks = [
+        {
+            var t = Trick(leadPosition: .south)
+            t.plays.append((position: .south, cards: [c(.spades, .three)]))
+            t.plays.append((position: .west, cards: [c(.hearts, .six)]))
+            t.plays.append((position: .north, cards: [c(.spades, .four)]))
+            t.plays.append((position: .east, cards: [c(.clubs, .six)]))
+            return t
+        }(),
+        {
+            var t = Trick(leadPosition: .north)
+            t.plays.append((position: .north, cards: [c(.spades, .five)]))
+            t.plays.append((position: .east, cards: [c(.diamonds, .seven)]))
+            t.plays.append((position: .south, cards: [c(.spades, .six)]))
+            t.plays.append((position: .west, cards: [c(.clubs, .seven)]))
+            return t
+        }()
+    ]
+    s.players[PlayerPosition.east.rawValue].hand =
+        [c(.spades, .queen), c(.spades, .queen), c(.spades, .king), c(.spades, .king), c(.hearts, .three)]
+    let chosen = AIPlayer.chooseCards(position: .east, state: s, evaluator: eval)
+    check(chosen.count == 1 && chosen[0].suit == .hearts && chosen[0].rank == .three,
+          "Test11 残局主拖拉机+副牌 → 先出副牌保留拖拉机",
+          "chosen=\(chosen.map { $0.shortDisplay })")
+}
+
 print(String(repeating: "─", count: 40))
 if failures.isEmpty {
     print("ALL TESTS PASSED ✅")

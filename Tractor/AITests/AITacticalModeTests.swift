@@ -482,4 +482,66 @@ final class AITacticalModeTests: XCTestCase {
         XCTAssertEqual(chosen.map { $0.shortDisplay }, ["♥A"],
                        "无将吃威胁应直接兑现♥A，chosen=\(chosen.map { $0.shortDisplay })")
     }
+
+    func testEndgamePreservesTrumpPairByLeadingSideJunk() {
+        let s = makeState(dealerTeam: 0)
+        s.currentTrick = Trick(leadPosition: .west)
+        s.currentLeader = .west
+        s.currentTurn = .west
+        s.completedTricks = [
+            {
+                var t = Trick(leadPosition: .south)
+                t.plays.append((position: .south, cards: [c(.spades, .three)]))
+                t.plays.append((position: .west, cards: [c(.spades, .four)]))
+                t.plays.append((position: .north, cards: [c(.hearts, .six)]))
+                t.plays.append((position: .east, cards: [c(.diamonds, .six)]))
+                return t
+            }(),
+            {
+                var t = Trick(leadPosition: .west)
+                t.plays.append((position: .west, cards: [c(.spades, .five)]))
+                t.plays.append((position: .north, cards: [c(.clubs, .three)]))
+                t.plays.append((position: .east, cards: [c(.spades, .six)]))
+                t.plays.append((position: .south, cards: [c(.diamonds, .four)]))
+                return t
+            }()
+        ]
+        setHand(s, .west, [c(.spades, .ace), c(.spades, .ace), c(.hearts, .three), c(.clubs, .four)])
+
+        let chosen = AIPlayer.chooseCards(position: .west, state: s, evaluator: eval)
+        XCTAssertEqual(chosen.count, 1)
+        XCTAssertFalse(CardComparator.isTrump(chosen[0], trumpSuit: ts, trumpRank: tr),
+                       "残局应先处理副牌垃圾，保留主对子锁最后阶段，chosen=\(chosen.map { $0.shortDisplay })")
+    }
+
+    func testEndgamePreservesTrumpTractorByLeadingSideJunk() {
+        let s = makeState(dealerTeam: 0)
+        s.currentTrick = Trick(leadPosition: .east)
+        s.currentLeader = .east
+        s.currentTurn = .east
+        s.completedTricks = [
+            {
+                var t = Trick(leadPosition: .south)
+                t.plays.append((position: .south, cards: [c(.spades, .three)]))
+                t.plays.append((position: .west, cards: [c(.hearts, .six)]))
+                t.plays.append((position: .north, cards: [c(.spades, .four)]))
+                t.plays.append((position: .east, cards: [c(.clubs, .six)]))
+                return t
+            }(),
+            {
+                var t = Trick(leadPosition: .north)
+                t.plays.append((position: .north, cards: [c(.spades, .five)]))
+                t.plays.append((position: .east, cards: [c(.diamonds, .seven)]))
+                t.plays.append((position: .south, cards: [c(.spades, .six)]))
+                t.plays.append((position: .west, cards: [c(.clubs, .seven)]))
+                return t
+            }()
+        ]
+        setHand(s, .east, [c(.spades, .queen), c(.spades, .queen),
+                           c(.spades, .king), c(.spades, .king), c(.hearts, .three)])
+
+        let chosen = AIPlayer.chooseCards(position: .east, state: s, evaluator: eval)
+        XCTAssertEqual(chosen.map { $0.shortDisplay }, ["♥3"],
+                       "残局应保留主拖拉机，不提前出或拆，chosen=\(chosen.map { $0.shortDisplay })")
+    }
 }
