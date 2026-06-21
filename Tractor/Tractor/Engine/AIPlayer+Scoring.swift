@@ -295,6 +295,22 @@ extension AIPlayer {
             score -= exposedPoints * opponentCapture * pointExposureWeight
         }
 
+        // A secure partner trick is an opportunity to remove future losers, not a
+        // blanket instruction to contribute points that can be cashed later.
+        if partnerWinningBefore && trickSecureBefore {
+            let trickContext = TrickContext(
+                position: position, hand: hand, state: state,
+                evaluator: evaluator, memory: ctx
+            )
+            score += move.cards.reduce(0.0) { partial, card in
+                let combination = CardCombination(cards: [card], pattern: .single(card))
+                return partial + partnerWonDiscardScore(
+                    candidate: combination, hand: hand,
+                    gameState: state, trickContext: trickContext
+                )
+            }
+        }
+
         return score
     }
 
@@ -1149,6 +1165,144 @@ extension AIPlayer {
         }
 
         return cost
+    }
+
+
+    /// A point-bearing holding whose points can be realized later without relying on
+    /// the current partner-won trick. These cards should be banked while a riskier
+    /// loser remains in hand.
+    static func isSafeBankedPointWinner(
+        candidate: CardCombination,
+        hand: [Card],
+        gameState: GameState
+    ) -> Bool {
+        guard candidate.cards.contains(where: { $0.pointValue > 0 }),
+              hand.count > candidate.cards.count else { return false }
+
+        let ts = gameState.trumpSuit
+        let tr = gameState.trumpRank
+        let position = gameState.currentTurn
+        let ctx = AIContext.build(state: gameState, ts: ts, tr: tr)
+        guard structureBreakPenalty(cards: candidate.cards, hand: hand, ts: ts, tr: tr) == 0,
+              strongStructureBreakPenalty(cards: candidate.cards, hand: hand, ts: ts, tr: tr) == 0 else {
+            return false
+        }
+        let enemiesOutOfTrump = ctx.allEnemiesVoid(myTeam: position.team, key: "TRUMP")
+        let allTrump = candidate.cards.allSatisfy {
+            CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
+        }
+
+        if allTrump {
+            let candidateIDs = Set(candidate.cards.map(\.id))
+            let remainingTrump = hand.filter {
+                CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
+                    && !candidateIDs.contains($0.id)
+            }
+            let control = candidate.cards.contains { isBigTrump($0, ts: ts, tr: tr) }
+                || strongTrumpCount(in: hand, ts: ts, tr: tr) >= 3
+                || remainingTrump.count >= 3
+            return enemiesOutOfTrump || control
+        }
+
+        guard candidate.cards.allSatisfy({
+            !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
+        }),
+        let suit = candidate.cards.first?.suit,
+        candidate.cards.allSatisfy({ $0.suit == suit }) else { return false }
+
+        // A known void enemy can ruff this winner unless both enemies are known to
+        // have exhausted trump. With no exposed void, the winner can be cashed on
+        // the next initiative opportunity.
+        let ruffThreat = !ctx.voidEnemies(myTeam: position.team, key: suit.rawValue).isEmpty
+            && !enemiesOutOfTrump
+        guard !ruffThreat else { return false }
+
+        switch candidate.pattern {
+        case .single(let card):
+            return card.rank == .ace || ctx.isEffectivelyBiggest(card, ts: ts, tr: tr)
+        case .pair(let first, _):
+            return isEffectivelyBiggestPair(first, hand: hand, ctx: ctx, ts: ts, tr: tr)
+        case .tractor:
+            guard let high = candidate.cards.max(by: {
+                CardComparator.pairOrderValue($0, trumpSuit: ts, trumpRank: tr)
+                    < CardComparator.pairOrderValue($1, trumpSuit: ts, trumpRank: tr)
+            }) else { return false }
+            return isEffectivelyBiggestPair(high, hand: hand, ctx: ctx, ts: ts, tr: tr)
+        case .mixed:
+            return candidate.cards.allSatisfy {
+                $0.rank == .ace || ctx.isEffectivelyBiggest($0, ts: ts, tr: tr)
+            }
+        }
+    }
+
+
+    /// Relative urgency to remove a holding while a teammate has safely banked the
+    /// current trick. Higher values mean the card is more likely to become a future loser.
+    static func futureDiscardRisk(
+        candidate: CardCombination,
+        hand: [Card],
+        gameState: GameState
+    ) -> Double {
+        guard !candidate.cards.isEmpty else { return 0 }
+        let ts = gameState.trumpSuit
+        let tr = gameState.trumpRank
+        let position = gameState.currentTurn
+        let ctx = AIContext.build(state: gameState, ts: ts, tr: tr)
+
+        if isSafeBankedPointWinner(candidate: candidate, hand: hand, gameState: gameState) {
+            return 0
+        }
+
+        var risk = 0.0
+        for card in candidate.cards {
+            if CardComparator.isTrump(card, trumpSuit: ts, trumpRank: tr) {
+                risk += isBigTrump(card, ts: ts, tr: tr) ? 0 : 4
+                continue
+            }
+
+            risk += 24
+            if card.rank.rawValue <= Rank.nine.rawValue { risk += 18 }
+            if !ctx.isEffectivelyBiggest(card, ts: ts, tr: tr) { risk += 20 }
+            if let suit = card.suit {
+                risk += Double(ctx.voidEnemies(myTeam: position.team, key: suit.rawValue).count) * 16
+            }
+            if card.pointValue > 0 { risk -= 8 }
+        }
+
+        let breakCost = structureBreakPenalty(cards: candidate.cards, hand: hand, ts: ts, tr: tr)
+            + strongStructureBreakPenalty(cards: candidate.cards, hand: hand, ts: ts, tr: tr)
+        return max(0, risk / Double(candidate.cards.count) - breakCost * 24)
+    }
+
+
+    static func partnerWonDiscardScore(
+        candidate: CardCombination,
+        hand: [Card],
+        gameState: GameState,
+        trickContext: TrickContext
+    ) -> Double {
+        let points = candidate.cards.reduce(0) { $0 + $1.pointValue }
+        let projectedAttackScore = gameState.attackScore + trickContext.trickPoints + points
+        let currentTeamAttacks = trickContext.position.team != gameState.dealerTeamIdx
+        let locksRound = currentTeamAttacks && gameState.attackScore < 80 && projectedAttackScore >= 80
+        let cardsRequired = gameState.currentTrick.leadCards?.count ?? candidate.cards.count
+        let finalHolding = hand.count <= max(candidate.cards.count, cardsRequired)
+        let risk = futureDiscardRisk(candidate: candidate, hand: hand, gameState: gameState)
+        let safeBanked = isSafeBankedPointWinner(candidate: candidate, hand: hand, gameState: gameState)
+        let candidateIDs = Set(candidate.cards.map(\.id))
+        let hasMoreDangerous = hand
+            .filter { !candidateIDs.contains($0.id) }
+            .contains {
+                let single = CardCombination(cards: [$0], pattern: .single($0))
+                return futureDiscardRisk(candidate: single, hand: hand, gameState: gameState) > risk + 8
+            }
+        let controlLoss = candidate.cards.reduce(0.0) {
+            $0 + discardControlAssetValue($1, hand: hand, state: gameState, ctx: trickContext.memory)
+        }
+
+        var score = Double(points) * 2 + risk - controlLoss * 0.35
+        if safeBanked && hasMoreDangerous && !locksRound && !finalHolding { score -= 120 }
+        return score
     }
 
 

@@ -800,24 +800,46 @@ extension AIPlayer {
             return Array(ordered.prefix(count))
         }
 
-        // 散牌按 tier 和分值/rank 排序
-        // 队友赢时（!enemyWinning）：同 tier 内高分牌优先（垫分给队友）
+        let partnerTrickContext: TrickContext? = {
+            guard let state, let position, let evaluator else { return nil }
+            return TrickContext(position: position, hand: fullHand ?? cards, state: state,
+                                evaluator: evaluator, memory: ctx)
+        }()
+
+        func partnerDiscardScore(_ group: [Card]) -> Double? {
+            guard let state, let trickContext = partnerTrickContext else { return nil }
+            let handForCost = fullHand ?? cards
+            return partnerWonDiscardScore(
+                candidate: CardCombination(
+                    cards: group,
+                    pattern: playPattern(for: group, ts: ts, tr: tr)
+                ),
+                hand: handForCost,
+                gameState: state,
+                trickContext: trickContext
+            )
+        }
+
+        // 队友赢时按未来处置风险排序：安全可兑现的分牌晚于小副牌等未来输张。
         let singletons = cards
             .filter { !isPaired($0) }
             .sorted { a, b in
+                if let aScore = partnerDiscardScore([a]), let bScore = partnerDiscardScore([b]),
+                   aScore != bScore { return aScore > bScore }
                 let ta = tier(a), tb = tier(b)
                 if ta != tb { return ta < tb }
-                if a.pointValue != b.pointValue { return a.pointValue > b.pointValue }
                 return discardOrder(a, before: b, trumpSuit: ts, trumpRank: tr)
             }
 
-        // 配对组按 tier（取首张代表）排序，同 tier 内高分牌优先垫给队友
+        // 对子仍整组处理，但同样先比较未来风险而不是即时分值。
         let pairedGroups = pairGroupMap.values
             .filter { $0.count >= 2 }
             .sorted { a, b in
+                let aPair = Array(a.prefix(2)), bPair = Array(b.prefix(2))
+                if let aScore = partnerDiscardScore(aPair), let bScore = partnerDiscardScore(bPair),
+                   aScore != bScore { return aScore > bScore }
                 let ta = tier(a[0]), tb = tier(b[0])
                 if ta != tb { return ta < tb }
-                if a[0].pointValue != b[0].pointValue { return a[0].pointValue > b[0].pointValue }
                 return discardOrder(a[0], before: b[0], trumpSuit: ts, trumpRank: tr)
             }
 

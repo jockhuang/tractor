@@ -33,6 +33,24 @@ func enemiesVoidClubsTrick() -> Trick {
     return t
 }
 
+func enemiesVoidTrumpTrick() -> Trick {
+    var t = Trick(leadPosition: .east)
+    t.plays.append((position: .east, cards: [c(.spades, .three)]))
+    t.plays.append((position: .south, cards: [c(.hearts, .six)]))
+    t.plays.append((position: .west, cards: [c(.spades, .four)]))
+    t.plays.append((position: .north, cards: [c(.diamonds, .six)]))
+    return t
+}
+
+func completedClubsRank(_ rank: Rank) -> Trick {
+    var t = Trick(leadPosition: .east)
+    t.plays.append((position: .east, cards: [c(.clubs, rank)]))
+    t.plays.append((position: .south, cards: [c(.clubs, rank)]))
+    t.plays.append((position: .west, cards: [c(.clubs, .six)]))
+    t.plays.append((position: .north, cards: [c(.clubs, .seven)]))
+    return t
+}
+
 var failures: [String] = []
 func check(_ cond: Bool, _ name: String, _ detail: @autoclosure () -> String = "") {
     if cond { print("✅ \(name)") }
@@ -58,6 +76,46 @@ do {
     let nonPoint = chosen.allSatisfy { $0.pointValue == 0 }
     check(beats && nonPoint, "Test1 有分防守用非分大牌压过(不垫小牌/不用K)",
           "chosen=\(chosen.map { $0.shortDisplay })")
+}
+
+// ── Safe Banked Point Winner：队友稳大时先清未来输张，不急着垫可自行兑现的分牌 ──
+do {
+    func chosenDiscard(pointCard: Card, higherRanksPlayed: [Rank]) -> (Card, Bool, Double, Double) {
+        let s = makeState(trump: ts, rank: tr)
+        s.completedTricks = [enemiesVoidTrumpTrick()] + higherRanksPlayed.map(completedClubsRank)
+        setTrick(s, lead: .east,
+                 plays: [(.east, [c(.hearts, .ace)]), (.south, [c(.hearts, .three)])],
+                 turn: .west)
+        let loser = c(.diamonds, .three)
+        let hand = [pointCard, loser]
+        s.players[PlayerPosition.west.rawValue].hand = hand
+        let chosen = AIPlayer.chooseCards(position: .west, state: s, evaluator: eval)[0]
+        let banked = AIPlayer.CardCombination(cards: [pointCard], pattern: .single(pointCard))
+        let danger = AIPlayer.CardCombination(cards: [loser], pattern: .single(loser))
+        return (
+            chosen,
+            AIPlayer.isSafeBankedPointWinner(candidate: banked, hand: hand, gameState: s),
+            AIPlayer.futureDiscardRisk(candidate: banked, hand: hand, gameState: s),
+            AIPlayer.futureDiscardRisk(candidate: danger, hand: hand, gameState: s)
+        )
+    }
+
+    let trumpTen = chosenDiscard(pointCard: c(.spades, .ten), higherRanksPlayed: [])
+    check(trumpTen.0.suit == .diamonds && trumpTen.0.rank == .three && trumpTen.1 && trumpTen.3 > trumpTen.2,
+          "Test12a 队友稳大保留安全主10，先垫小副3",
+          "chosen=\(trumpTen.0.shortDisplay), banked=\(trumpTen.1), risks=\(trumpTen.2)/\(trumpTen.3)")
+
+    let biggestKing = chosenDiscard(pointCard: c(.clubs, .king), higherRanksPlayed: [.ace])
+    check(biggestKing.0.suit == .diamonds && biggestKing.0.rank == .three && biggestKing.1,
+          "Test12b 队友稳大保留已知最大K，先垫小副3",
+          "chosen=\(biggestKing.0.shortDisplay), banked=\(biggestKing.1)")
+
+    let biggestTen = chosenDiscard(
+        pointCard: c(.clubs, .ten), higherRanksPlayed: [.jack, .queen, .king, .ace]
+    )
+    check(biggestTen.0.suit == .diamonds && biggestTen.0.rank == .three && biggestTen.1,
+          "Test12c 队友稳大保留已知最大10，先垫小副3",
+          "chosen=\(biggestTen.0.shortDisplay), banked=\(biggestTen.1)")
 }
 
 // ── Test 2：当前墩无分，且我非本队最后行动者（西先手，队友南在我之后）→ 非阻分，应保留大主出小牌 ──
