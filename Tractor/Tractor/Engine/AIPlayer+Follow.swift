@@ -13,19 +13,11 @@ extension AIPlayer {
         position: PlayerPosition,
         state: GameState,
         evaluator: TrickEvaluator,
-        forcedCards: [Card] = [],
         ctx: AIContext
     ) -> [Card] {
-        if !forcedCards.isEmpty {
-            return followCardsRuleBased(
-                leadCards: leadCards, hand: hand, position: position,
-                state: state, evaluator: evaluator, forcedCards: forcedCards, ctx: ctx
-            )
-        }
-
         let baseline = followCardsRuleBased(
             leadCards: leadCards, hand: hand, position: position,
-            state: state, evaluator: evaluator, forcedCards: forcedCards, ctx: ctx
+            state: state, evaluator: evaluator, ctx: ctx
         )
         var candidates = [AIMove(cards: baseline, kind: .followBaseline)]
         candidates += generateFollowCandidates(
@@ -34,6 +26,13 @@ extension AIPlayer {
         )
         candidates += generateTrumpControlCandidates(
             leadCards: leadCards,
+            hand: hand,
+            position: position,
+            state: state,
+            evaluator: evaluator,
+            ctx: ctx
+        )
+        candidates += findRuffWinningMoves(
             hand: hand,
             position: position,
             state: state,
@@ -54,8 +53,33 @@ extension AIPlayer {
             evaluator: evaluator,
             ctx: ctx
         )
-        let trumpControlFilteredLegal = filterTrumpControlMoves(
+        let knownVoidContestFilteredLegal = filterKnownVoidOpponentRuffContest(
             exposureFilteredLegal,
+            leadCards: leadCards,
+            hand: hand,
+            position: position,
+            state: state,
+            evaluator: evaluator,
+            ctx: ctx
+        )
+        let requiredRuffFilteredLegal = filterRequiredRuffMoves(
+            knownVoidContestFilteredLegal,
+            hand: hand,
+            position: position,
+            state: state,
+            evaluator: evaluator,
+            ctx: ctx
+        )
+        let trumpPullFilteredLegal = filterTrumpPullPointContest(
+            requiredRuffFilteredLegal,
+            hand: hand,
+            position: position,
+            state: state,
+            evaluator: evaluator,
+            ctx: ctx
+        )
+        let trumpControlFilteredLegal = filterTrumpControlMoves(
+            trumpPullFilteredLegal,
             leadCards: leadCards,
             hand: hand,
             position: position,
@@ -111,28 +135,11 @@ extension AIPlayer {
         position: PlayerPosition,
         state: GameState,
         evaluator: TrickEvaluator,
-        forcedCards: [Card] = [],
         ctx: AIContext
     ) -> [Card] {
         let ts = state.trumpSuit
         let tr = state.trumpRank
         let count = leadCards.count
-
-        // 甩牌失败强制出牌
-        if !forcedCards.isEmpty {
-            var chosen = Array(forcedCards.prefix(count))
-            if chosen.count < count {
-                let usedIDs = Set(chosen.map { $0.id })
-                let rest = hand.filter { !usedIDs.contains($0.id) }
-                chosen += smartDiscard(
-                    from: rest, count: count - chosen.count,
-                    enemyWinning: true, ts: ts, tr: tr,
-                    myTeam: position.team, ctx: ctx,
-                    state: state, position: position, evaluator: evaluator, fullHand: hand
-                )
-            }
-            return Array(chosen.prefix(count))
-        }
 
         let leadSuit     = evaluator.dominantSuit(of: leadCards)
         let currentWinner = evaluator.winner(of: state.currentTrick)
@@ -800,24 +807,46 @@ extension AIPlayer {
             return Array(ordered.prefix(count))
         }
 
-        // 散牌按 tier 和分值/rank 排序
-        // 队友赢时（!enemyWinning）：同 tier 内高分牌优先（垫分给队友）
+        let partnerTrickContext: TrickContext? = {
+            guard let state, let position, let evaluator else { return nil }
+            return TrickContext(position: position, hand: fullHand ?? cards, state: state,
+                                evaluator: evaluator, memory: ctx)
+        }()
+
+        func partnerDiscardScore(_ group: [Card]) -> Double? {
+            guard let state, let trickContext = partnerTrickContext else { return nil }
+            let handForCost = fullHand ?? cards
+            return partnerWonDiscardScore(
+                candidate: CardCombination(
+                    cards: group,
+                    pattern: playPattern(for: group, ts: ts, tr: tr)
+                ),
+                hand: handForCost,
+                gameState: state,
+                trickContext: trickContext
+            )
+        }
+
+        // 队友赢时按未来处置风险排序：安全可兑现的分牌晚于小副牌等未来输张。
         let singletons = cards
             .filter { !isPaired($0) }
             .sorted { a, b in
+                if let aScore = partnerDiscardScore([a]), let bScore = partnerDiscardScore([b]),
+                   aScore != bScore { return aScore > bScore }
                 let ta = tier(a), tb = tier(b)
                 if ta != tb { return ta < tb }
-                if a.pointValue != b.pointValue { return a.pointValue > b.pointValue }
                 return discardOrder(a, before: b, trumpSuit: ts, trumpRank: tr)
             }
 
-        // 配对组按 tier（取首张代表）排序，同 tier 内高分牌优先垫给队友
+        // 对子仍整组处理，但同样先比较未来风险而不是即时分值。
         let pairedGroups = pairGroupMap.values
             .filter { $0.count >= 2 }
             .sorted { a, b in
+                let aPair = Array(a.prefix(2)), bPair = Array(b.prefix(2))
+                if let aScore = partnerDiscardScore(aPair), let bScore = partnerDiscardScore(bPair),
+                   aScore != bScore { return aScore > bScore }
                 let ta = tier(a[0]), tb = tier(b[0])
                 if ta != tb { return ta < tb }
-                if a[0].pointValue != b[0].pointValue { return a[0].pointValue > b[0].pointValue }
                 return discardOrder(a[0], before: b[0], trumpSuit: ts, trumpRank: tr)
             }
 
@@ -1173,6 +1202,90 @@ extension AIPlayer {
             return noUnknownHigherTrumpThan(highTrump, hand: hand, ts: state.trumpSuit, tr: state.trumpRank, ctx: ctx)
         }
         return nonRisky.isEmpty ? moves : nonRisky
+    }
+
+
+    /// P2/P3 绝副牌时，若已知后手对手也绝该门且仍可能有主，双方进入盖吃竞争：
+    /// - 只用最小的、当前可赢的主 A / 级牌参与；
+    /// - 弱主和主分牌不参与，有 0 分副牌时直接垫牌；
+    /// - 大小王作为最高控制资产，不用于这类竞争。
+    ///
+    /// 该过滤必须早于 `filterRequiredRuffMoves`，否则高分墩的“强制将吃”
+    /// 会先删掉安全垫牌，让后续风险模型失去选择空间。
+    static func filterKnownVoidOpponentRuffContest(
+        _ moves: [AIMove],
+        leadCards: [Card],
+        hand: [Card],
+        position: PlayerPosition,
+        state: GameState,
+        evaluator: TrickEvaluator,
+        ctx: AIContext
+    ) -> [AIMove] {
+        let playCount = state.currentTrick.plays.count
+        guard moves.count > 1,
+              playCount == 1 || playCount == 2,
+              leadCards.count == 1,
+              let leadSuit = evaluator.dominantSuit(of: leadCards),
+              hand.allSatisfy({ evaluator.cardSuit($0) != leadSuit }) else {
+            return moves
+        }
+
+        let leadKey = leadSuit.rawValue
+        let threatenedByKnownVoidOpponent = unplayedSubsequentPositions(after: position, in: state)
+            .contains {
+                $0.team != position.team
+                    && ctx.isVoid($0, key: leadKey)
+                    && !ctx.isVoid($0, key: "TRUMP")
+            }
+        guard threatenedByKnownVoidOpponent else { return moves }
+
+        let ts = state.trumpSuit
+        let tr = state.trumpRank
+
+        func isAllowedControlTrump(_ card: Card) -> Bool {
+            guard CardComparator.isTrump(card, trumpSuit: ts, trumpRank: tr),
+                  card.rank != .bigJoker,
+                  card.rank != .smallJoker else { return false }
+            return card.rank == tr || (card.suit == ts && card.rank == .ace)
+        }
+
+        let controlRuffs = moves.filter { move in
+            guard move.cards.count == 1,
+                  let card = move.cards.first,
+                  isAllowedControlTrump(card) else { return false }
+            return candidateWinsTrick(
+                move.cards,
+                position: position,
+                state: state,
+                evaluator: evaluator
+            )
+        }
+        if let weakestControlWeight = controlRuffs
+            .compactMap(\.cards.first)
+            .map({ CardComparator.trumpWeight($0, trumpSuit: ts, trumpRank: tr) })
+            .min() {
+            return controlRuffs.filter {
+                guard let card = $0.cards.first else { return false }
+                return CardComparator.trumpWeight(card, trumpSuit: ts, trumpRank: tr)
+                    == weakestControlWeight
+            }
+        }
+
+        let zeroPointSideDiscards = moves.filter { move in
+            !move.cards.isEmpty && move.cards.allSatisfy {
+                $0.pointValue == 0
+                    && !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
+            }
+        }
+        if !zeroPointSideDiscards.isEmpty { return zeroPointSideDiscards }
+
+        // 没有 0 分副牌时仍优先垫副牌，避免为了保一张副牌而动弱主、主分或王。
+        let sideDiscards = moves.filter { move in
+            !move.cards.isEmpty && move.cards.allSatisfy {
+                !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
+            }
+        }
+        return sideDiscards.isEmpty ? moves : sideDiscards
     }
 
 
@@ -1645,65 +1758,131 @@ extension AIPlayer {
         winningCards: [Card],
         ts: Suit?, tr: Rank
     ) -> [Card]? {
+        guard slam.count > 0, trumpCards.count >= slam.count else { return nil }
         let pureSingleSlam = slam.tractors.isEmpty && slam.pairs.isEmpty
-        let pairedTrumpIDs = pairedCardIDs(in: trumpCards, trumpSuit: ts, trumpRank: tr)
-        let tractorSizes = slam.tractors
-            .compactMap { tractorInfo(of: $0, trumpSuit: ts, trumpRank: tr)?.pairCount }
-            .sorted(by: >)
+        let evaluator = TrickEvaluator(trumpSuit: ts, trumpRank: tr)
+        var best: [Card]?
 
-        // 贪心构造：依次取最弱的连对 → 对子 → 单张
-        var pool   = trumpCards
-        var result = [Card]()
-
-        for neededSize in tractorSizes {
-            let candidates = tractors(in: pool, pairCount: neededSize,
-                                      trumpSuit: ts, trumpRank: tr)
-                .sorted { weakerTractor($0, than: $1, trumpSuit: ts, trumpRank: tr) }
-            guard let weakest = candidates.first else { return nil }
-            result += weakest
-            let ids = Set(weakest.map { $0.id })
-            pool = pool.filter { !ids.contains($0.id) }
-        }
-
-        for _ in 0..<slam.pairs.count {
-            let candidates = pairs(in: pool, trumpSuit: ts, trumpRank: tr)
-                .sorted { weakerPair($0, than: $1, trumpSuit: ts, trumpRank: tr) }
-            guard let weakest = candidates.first else { return nil }
-            result += weakest
-            let ids = Set(weakest.map { $0.id })
-            pool = pool.filter { !ids.contains($0.id) }
-        }
-
-        for _ in 0..<slam.singles.count {
-            let sorted = pool.sorted { a, b in
-                if pureSingleSlam {
-                    let aPaired = pairedTrumpIDs.contains(a.id)
-                    let bPaired = pairedTrumpIDs.contains(b.id)
-                    if aPaired != bPaired { return !aPaired }
-                }
-                return discardOrder(a, before: b, trumpSuit: ts, trumpRank: tr)
+        func candidateBeatsCurrentWinner(_ candidate: [Card]) -> Bool {
+            guard candidate.count == slam.count,
+                  candidate.allSatisfy({
+                      CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
+                  }) else {
+                return false
             }
-            guard let weakest = sorted.first else { return nil }
-            result.append(weakest)
-            pool = pool.filter { $0.id != weakest.id }
+
+            var trick = Trick(leadPosition: .south)
+            trick.plays.append((position: .south, cards: slam.allCards))
+            let winnerIsLead = Set(winningCards.map(\.id)) == Set(slam.allCards.map(\.id))
+            if !winnerIsLead {
+                trick.plays.append((position: .west, cards: winningCards))
+            }
+            let candidatePosition: PlayerPosition = winnerIsLead ? .west : .north
+            trick.plays.append((position: candidatePosition, cards: candidate))
+            return evaluator.winner(of: trick) == candidatePosition
         }
 
-        guard result.count == slam.count else { return nil }
-
-        // 判断能否压过当前赢家
-        let winnerIsTrump = winningCards.first.map {
-            CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
-        } ?? false
-
-        if !winnerIsTrump { return result }  // 主牌必然大于非主赢家
-
-        // 赢家也是主牌：用最高牌近似比较（足够 AI 决策）
-        let comboHigh  = result.max      { CardComparator.beats($1, $0, trumpSuit: ts, trumpRank: tr) }!
-        let winnerHigh = winningCards.max { CardComparator.beats($1, $0, trumpSuit: ts, trumpRank: tr) }!
-        guard CardComparator.beats(comboHigh, winnerHigh, trumpSuit: ts, trumpRank: tr) else {
-            return nil  // 压不过 → 不浪费主牌
+        func primaryStrength(_ cards: [Card]) -> Int {
+            if !slam.tractors.isEmpty || !slam.pairs.isEmpty {
+                let pairRepresentatives = pairs(
+                    in: cards,
+                    trumpSuit: ts,
+                    trumpRank: tr
+                ).compactMap {
+                    pairRepresentative(of: $0, trumpSuit: ts, trumpRank: tr)
+                }
+                return pairRepresentatives.map {
+                    cardStrength($0, ts: ts, tr: tr)
+                }.max() ?? Int.max
+            }
+            return cards.map { cardStrength($0, ts: ts, tr: tr) }.max() ?? Int.max
         }
-        return result
+
+        func isWeakerSelection(_ lhs: [Card], than rhs: [Card]) -> Bool {
+            let lhsPrimary = primaryStrength(lhs)
+            let rhsPrimary = primaryStrength(rhs)
+            if lhsPrimary != rhsPrimary { return lhsPrimary < rhsPrimary }
+
+            let lhsBreak = structureBreakPenalty(cards: lhs, hand: trumpCards, ts: ts, tr: tr)
+                + strongStructureBreakPenalty(cards: lhs, hand: trumpCards, ts: ts, tr: tr)
+            let rhsBreak = structureBreakPenalty(cards: rhs, hand: trumpCards, ts: ts, tr: tr)
+                + strongStructureBreakPenalty(cards: rhs, hand: trumpCards, ts: ts, tr: tr)
+            if lhsBreak != rhsBreak { return lhsBreak < rhsBreak }
+            return trumpMoveCost(lhs, ts: ts, tr: tr) < trumpMoveCost(rhs, ts: ts, tr: tr)
+        }
+
+        func consider(_ candidate: [Card]) {
+            guard candidateBeatsCurrentWinner(candidate) else { return }
+            if let currentBest = best {
+                if isWeakerSelection(candidate, than: currentBest) {
+                    best = candidate
+                }
+            } else {
+                best = candidate
+            }
+        }
+
+        if pureSingleSlam {
+            // 纯散牌甩牌只比较最高单张。逐一把每张主牌作为可能的控制牌，
+            // 其余位置优先使用不拆对的最弱主牌，再由规则执行器确认能否盖吃。
+            let pairedIDs = pairedCardIDs(in: trumpCards, trumpSuit: ts, trumpRank: tr)
+            for controlCard in trumpCards {
+                let rest = trumpCards
+                    .filter { $0.id != controlCard.id }
+                    .sorted { lhs, rhs in
+                        let lhsPaired = pairedIDs.contains(lhs.id)
+                        let rhsPaired = pairedIDs.contains(rhs.id)
+                        if lhsPaired != rhsPaired { return !lhsPaired }
+                        return discardOrder(lhs, before: rhs, trumpSuit: ts, trumpRank: tr)
+                    }
+                let candidate = [controlCard] + Array(rest.prefix(slam.count - 1))
+                consider(candidate)
+            }
+            return best
+        }
+
+        // 有结构的甩牌：枚举手中完整对子子集。每个未选牌面最多拿一张
+        // 作为散牌填充，避免“填散牌”偷偷生成额外对子；需要更多对子时会
+        // 在另一个子集中被完整枚举。规则执行器负责验证连对覆盖和结构大小。
+        var grouped: [String: [Card]] = [:]
+        for card in trumpCards {
+            grouped[CardComparator.pairKey(card, trumpSuit: ts, trumpRank: tr),
+                    default: []].append(card)
+        }
+        let pairGroups = grouped.values.compactMap {
+            $0.count >= 2 ? Array($0.prefix(2)) : nil
+        }
+        let requiredPairCredits = slam.tractors.reduce(0) { $0 + $1.count / 2 }
+            + slam.pairs.count
+        let subsetCount = 1 << pairGroups.count
+
+        for mask in 0..<subsetCount {
+            if mask.nonzeroBitCount < requiredPairCredits { continue }
+            let pairCardCount = mask.nonzeroBitCount * 2
+            if pairCardCount > slam.count { continue }
+
+            var selectedPairs: [Card] = []
+            for index in pairGroups.indices where (mask & (1 << index)) != 0 {
+                selectedPairs += pairGroups[index]
+            }
+
+            let selectedIDs = Set(selectedPairs.map(\.id))
+            let remaining = trumpCards.filter { !selectedIDs.contains($0.id) }
+            let fillerByFace = Dictionary(
+                grouping: remaining,
+                by: { CardComparator.pairKey($0, trumpSuit: ts, trumpRank: tr) }
+            )
+            let fillers = fillerByFace.values
+                .compactMap(\.first)
+                .sorted {
+                    discardOrder($0, before: $1, trumpSuit: ts, trumpRank: tr)
+                }
+            let fillCount = slam.count - selectedPairs.count
+            guard fillers.count >= fillCount else { continue }
+            consider(selectedPairs + Array(fillers.prefix(fillCount)))
+        }
+
+        return best
     }
 
 

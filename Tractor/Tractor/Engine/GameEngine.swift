@@ -12,12 +12,12 @@ class GameEngine: ObservableObject {
     private var aiDelay: TimeInterval = 1.2
     private var trickEndDelay: TimeInterval = 1.5
     private var stateCancellable: AnyCancellable?
-    private var phaseCancellable: AnyCancellable?
     private var dealingTask: Task<Void, Never>?
     private var aiTurnTask: Task<Void, Never>?
     private var trickResolutionTask: Task<Void, Never>?
     private var aiTurnGeneration = 0
     private var trickResolutionGeneration = 0
+    private var lastDrawnCardIDsByPosition: [PlayerPosition: UUID] = [:]
     let multiplayer = LANMultiplayerManager()
     @Published var localPosition: PlayerPosition = .south
     private var humanControlledPositions: Set<PlayerPosition> = [.south]
@@ -32,7 +32,6 @@ class GameEngine: ObservableObject {
     private func subscribeToState() {
         stateCancellable = state.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
-
     }
 
     // MARK: - 开始游戏 / 新局
@@ -82,6 +81,7 @@ class GameEngine: ObservableObject {
     func startNewRound() {
         dealingTask?.cancel()
         cancelScheduledTurnWork()
+        lastDrawnCardIDsByPosition = [:]
         state.resetRound()
         state.phase     = .dealing
         state.trumpRank = state.currentDealerTeamLevel
@@ -118,13 +118,7 @@ class GameEngine: ObservableObject {
             let card = deck[i]
 
             withAnimation(.spring(response: 0.15, dampingFraction: 0.8)) {
-                state.player(pos).hand.append(card)
-                // 实时排序：同花色聚拢，级牌/Joker 靠左
-                state.player(pos).sortHand(trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
-            }
-            // 记录本家最新拿到的牌 ID，用于高亮浮起效果
-            if pos == localPosition {
-                state.lastDrawnCardId = card.id
+                addDealtCard(card, to: pos)
             }
             state.dealtCount = i + 1
 
@@ -158,6 +152,7 @@ class GameEngine: ObservableObject {
             state.player(pos).sortHand(trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
         }
         // 清除发牌高亮
+        lastDrawnCardIDsByPosition = [:]
         state.lastDrawnCardId = nil
 
         try? await Task.sleep(nanoseconds: 300_000_000)
@@ -178,6 +173,19 @@ class GameEngine: ObservableObject {
 
         afterDealingComplete()
         syncMultiplayerState()
+    }
+
+    private func addDealtCard(_ card: Card, to position: PlayerPosition) {
+        let player = state.player(position)
+        player.hand.append(card)
+        lastDrawnCardIDsByPosition[position] = card.id
+        if position == localPosition {
+            state.lastDrawnCardId = card.id
+        }
+
+        // Host 的本机和远端真人都会接收这份手牌顺序；AI 只显示数量，无需逐张排序。
+        guard humanControlledPositions.contains(position) else { return }
+        player.sortHand(trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
     }
 
     /// 快速发牌（跳过剩余延迟）
@@ -856,24 +864,6 @@ class GameEngine: ObservableObject {
         }
 
         if !state.currentTrick.plays.isEmpty {
-            // 甩牌失败强制出牌校验：若人类选牌未包含强制牌，自动替换为强制牌+最弱补牌
-            if let forced = state.forcedFollowCards[position], !forced.isEmpty {
-                let forcedIDs   = Set(forced.map { $0.id })
-                let selectedIDs = Set(selected.map { $0.id })
-                if !forcedIDs.isSubset(of: selectedIDs) {
-                    // 回退人类选的牌，改成强制牌 + 最弱补牌
-                    let autoCards = buildForcedPlay(
-                        forced: forced,
-                        hand: player.hand,
-                        count: leadCount
-                    )
-                    state.message = "甩牌失败，强制出：\(forced.map { $0.shortDisplay }.joined(separator: " "))"
-                    syncMultiplayerState()
-                    performPlay(position: position, cards: autoCards)
-                    return
-                }
-            }
-
             let evaluator = makeEvaluator()
             guard evaluator.isValidPlay(
                 selected: selected,
@@ -919,18 +909,11 @@ class GameEngine: ObservableObject {
         state.selectedCards = []
         state.message = "\(displayName(for: position)) 出了 \(cards.map { $0.shortDisplay }.joined(separator: " "))"
 
-        // 首张：检测甩牌，更新强制出牌和罚分
-        // 若是人类甩牌失败，需回退出牌并让人类重新选择
+        // 首张：失败甩牌自动收缩为甩牌方的最小失败组件。
         if state.currentTrick.plays.count == 1 {
-            if humanControlledPositions.contains(position) {
-                if revertSlamIfFailed(position: position, cards: cards) {
-                    return   // 已回退，等待人类重新出牌
-                }
-            } else {
-                analyzeSlamLead(position: position, cards: cards)
-            }
+            let resolvedLeadCards = resolveSlamLead(position: position, attemptedCards: cards)
             // 领出语音播报
-            let announcement = makeEvaluator().leadAnnouncement(cards: cards)
+            let announcement = makeEvaluator().leadAnnouncement(cards: resolvedLeadCards)
             SoundManager.shared.speakLead(announcement)
         }
 
@@ -997,10 +980,9 @@ class GameEngine: ObservableObject {
             return
         }
 
-        state.currentTrick        = Trick(leadPosition: winner)
-        state.forcedFollowCards   = [:]   // 新的一墩，清除强制出牌
-        state.phase               = .playing
-        state.isResolvingTrick    = false
+        state.currentTrick     = Trick(leadPosition: winner)
+        state.phase            = .playing
+        state.isResolvingTrick = false
         syncMultiplayerState()
 
         if !humanControlledPositions.contains(winner) {
@@ -1130,12 +1112,10 @@ class GameEngine: ObservableObject {
               state.currentTurn == position,
               !state.currentTrick.plays.contains(where: { $0.position == position }) else { return }
 
-        let forcedCards = state.forcedFollowCards[position] ?? []
         let cards = AIPlayer.chooseCards(
             position: position,
             state: state,
-            evaluator: makeEvaluator(),
-            forcedCards: forcedCards
+            evaluator: makeEvaluator()
         )
         performPlay(position: position, cards: cards)
     }
@@ -1253,113 +1233,47 @@ class GameEngine: ObservableObject {
 
     // MARK: - 甩牌分析
 
-    /// 若人类先手甩牌失败，回退出牌，重置到出牌前状态，返回 true 表示已回退
-    private func revertSlamIfFailed(position: PlayerPosition, cards: [Card]) -> Bool {
+    /// 甩牌失败时，把实际领出收缩为甩牌方的最小失败组件。
+    /// 其余牌退回手牌；后续玩家完全按普通跟牌规则行动。
+    private func resolveSlamLead(
+        position: PlayerPosition,
+        attemptedCards: [Card]
+    ) -> [Card] {
         let evaluator = makeEvaluator()
-        guard let slam = evaluator.slamInfo(of: cards) else {
-            // 不是甩牌，正常走后续流程
-            analyzeSlamLead(position: position, cards: cards)
-            return false
-        }
+        guard let slam = evaluator.slamInfo(of: attemptedCards) else { return attemptedCards }
 
-        // 先对所有对手的手牌做检测
         let opponents = PlayerPosition.allCases.filter { $0 != position }
-        var opponentHands: [PlayerPosition: [Card]] = [:]
-        for pos in opponents {
-            opponentHands[pos] = state.player(pos).hand
-        }
-        let penalty = evaluator.slamPenaltyPoints(slam: slam, opponentHands: opponentHands)
-
-        if penalty == 0 {
-            // 甩牌成功，继续正常流程（设置强制跟牌）
-            analyzeSlamLead(position: position, cards: cards)
-            return false
+        let opponentHands = Dictionary(
+            uniqueKeysWithValues: opponents.map { ($0, state.player($0).hand) }
+        )
+        guard let failure = evaluator.slamFailure(
+            slam: slam,
+            opponentHands: opponentHands
+        ) else {
+            return attemptedCards
         }
 
-        // 甩牌失败：回退人类的出牌
-        state.currentTrick.plays.removeLast()
-        state.player(position).hand.append(contentsOf: cards)
-        state.player(position).sortHand(trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
+        let forcedIDs = Set(failure.forcedLeadCards.map(\.id))
+        let returnedCards = attemptedCards.filter { !forcedIDs.contains($0.id) }
+        let player = state.player(position)
+        player.hand.append(contentsOf: returnedCards)
+        player.sortHand(trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
+        state.currentTrick.plays[0] = (
+            position: position,
+            cards: failure.forcedLeadCards
+        )
 
-        // 扣分
         if position.team == state.attackTeamIdx {
-            state.attackScore = max(0, state.attackScore - penalty)
+            state.attackScore = max(0, state.attackScore - failure.penaltyPoints)
         } else {
-            state.attackScore += penalty
+            state.attackScore += failure.penaltyPoints
         }
 
-        // 显示哪些对手有更大的牌
-        var forcedParts: [String] = []
-        for pos in opponents {
-            let forcing = evaluator.slamForcing(slam: slam, opponentHand: opponentHands[pos]!)
-            if !forcing.isEmpty {
-                let display = forcing.resolvedForcedCards.map { $0.shortDisplay }.joined(separator: " ")
-                forcedParts.append("\(displayName(for: pos))有[\(display)]")
-            }
-        }
-        state.message = "甩牌失败 -\(penalty)分（\(forcedParts.joined(separator: "，"))），请重新出牌"
-        syncMultiplayerState()
-        return true
-    }
-
-    /// 构建强制出牌：forced 牌 + 从手牌中取最弱补牌，总张数 = count
-    private func buildForcedPlay(forced: [Card], hand: [Card], count: Int) -> [Card] {
-        var result = Array(forced.prefix(count))
-        if result.count < count {
-            let usedIDs = Set(result.map { $0.id })
-            let rest = hand.filter { !usedIDs.contains($0.id) }
-            let ts = state.trumpSuit
-            let tr = state.trumpRank
-            let fill = rest.sorted { a, b in
-                // 垫牌顺序：非主优先，分值低优先，rank 小优先
-                let aTrump = CardComparator.isTrump(a, trumpSuit: ts, trumpRank: tr)
-                let bTrump = CardComparator.isTrump(b, trumpSuit: ts, trumpRank: tr)
-                if aTrump != bTrump { return !aTrump }
-                if a.pointValue != b.pointValue { return a.pointValue < b.pointValue }
-                return a.rank.rawValue < b.rank.rawValue
-            }
-            result += Array(fill.prefix(count - result.count))
-        }
-        return Array(result.prefix(count))
-    }
-
-    /// 检测领出的牌是否为甩牌，若是则计算罚分并设置各家的强制出牌
-    private func analyzeSlamLead(position: PlayerPosition, cards: [Card]) {
-        let evaluator = makeEvaluator()
-        guard let slam = evaluator.slamInfo(of: cards) else { return }
-
-        let opponents = PlayerPosition.allCases.filter { $0 != position }
-        var opponentHands: [PlayerPosition: [Card]] = [:]
-        var forced: [PlayerPosition: [Card]] = [:]
-
-        for pos in opponents {
-            let hand = state.player(pos).hand
-            opponentHands[pos] = hand
-            let forcing = evaluator.slamForcing(slam: slam, opponentHand: hand)
-            if !forcing.isEmpty {
-                forced[pos] = forcing.resolvedForcedCards
-            }
-        }
-
-        // 罚分
-        let penalty = evaluator.slamPenaltyPoints(slam: slam, opponentHands: opponentHands)
-        if penalty > 0 {
-            if position.team == state.attackTeamIdx {
-                // 攻方甩错牌：攻方得分减少
-                state.attackScore = max(0, state.attackScore - penalty)
-            } else {
-                // 庄方甩错牌：攻方得分增加
-                state.attackScore += penalty
-            }
-            state.message += "  ⚡甩牌失败 -\(penalty)分"
-        }
-
-        // 记录强制出牌
-        if !forced.isEmpty {
-            state.forcedFollowCards = forced
-            let names = forced.keys.map { displayName(for: $0) }.joined(separator: "、")
-            state.message += "  [\(names) 被强制出牌]"
-        }
+        let forcedDisplay = failure.forcedLeadCards
+            .map(\.shortDisplay)
+            .joined(separator: " ")
+        state.message = "\(displayName(for: position)) 甩牌失败 -\(failure.penaltyPoints)分，强制出最小\(failure.forcedKind.displayName)：\(forcedDisplay)"
+        return failure.forcedLeadCards
     }
 
     // MARK: - 开始下一局
@@ -1431,6 +1345,7 @@ class GameEngine: ObservableObject {
             dealerTeamIdx: state.dealerTeamIdx,
             message: state.message,
             lastRoundResult: state.lastRoundResult,
+            lastDrawnCardId: lastDrawnCardIDsByPosition[position],
             players: players
         )
     }
@@ -1458,6 +1373,7 @@ class GameEngine: ObservableObject {
         state.dealerTeamIdx = snapshot.dealerTeamIdx
         state.message = snapshot.message
         state.lastRoundResult = snapshot.lastRoundResult
+        state.lastDrawnCardId = snapshot.lastDrawnCardId
 
         for playerSnapshot in snapshot.players {
             let player = state.player(playerSnapshot.position)

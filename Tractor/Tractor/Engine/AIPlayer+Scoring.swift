@@ -125,7 +125,8 @@ extension AIPlayer {
                 if CardComparator.isTrump(card, trumpSuit: ts, trumpRank: tr) {
                     return partial + (isBigTrump(card, ts: ts, tr: tr) ? 0.45 : 0.2)
                 }
-                return partial + ((card.rank == .ace || ctx.isEffectivelyBiggest(card, ts: ts, tr: tr)) ? 0.35 : 0.1)
+                return partial + ((card.rank == .ace
+                    || ctx.isEffectivelyBiggest(card, ts: ts, tr: tr, hand: hand)) ? 0.35 : 0.1)
             }
 
         let noTrumpBoost = ts == nil ? 0.25 : 0
@@ -293,6 +294,22 @@ extension AIPlayer {
                 state: state, evaluator: evaluator, ctx: ctx
             )
             score -= exposedPoints * opponentCapture * pointExposureWeight
+        }
+
+        // A secure partner trick is an opportunity to remove future losers, not a
+        // blanket instruction to contribute points that can be cashed later.
+        if partnerWinningBefore && trickSecureBefore {
+            let trickContext = TrickContext(
+                position: position, hand: hand, state: state,
+                evaluator: evaluator, memory: ctx
+            )
+            score += move.cards.reduce(0.0) { partial, card in
+                let combination = CardCombination(cards: [card], pattern: .single(card))
+                return partial + partnerWonDiscardScore(
+                    candidate: combination, hand: hand,
+                    gameState: state, trickContext: trickContext
+                )
+            }
         }
 
         return score
@@ -484,15 +501,38 @@ extension AIPlayer {
 
         // 非最后行动者：仍有队友在后，按是否能赢/逼牌走原有判断（仅本墩有分时才进入争夺模式）。
         guard tc.trickPoints > 0 else { return .normal }
-        let canWinTrick = legalMoves.contains {
-            candidateWinsTrick($0.cards, position: position, state: state, evaluator: evaluator)
+        let classifiedMoves = legalMoves.map { move in
+            (
+                move: move,
+                winClass: classifyFollowMove(
+                    move.cards,
+                    position: position,
+                    hand: hand,
+                    state: state,
+                    evaluator: evaluator,
+                    ctx: ctx
+                )
+            )
         }
-        if canWinTrick { return .pointCapture }
-        let canBeatCurrentWinner = legalMoves.contains {
-            candidateWinsTrick($0.cards, position: position, state: state, evaluator: evaluator)
-                && currentWinnerOpponentBeaten($0, position: position, state: state, evaluator: evaluator)
+        if classifiedMoves.contains(where: {
+            if case .finalWin = $0.winClass { return true }
+            return false
+        }) {
+            return .pointCapture
         }
-        if canBeatCurrentWinner { return .forceOpponentCost }
+        // 当前能抬过对手、但后手仍可能再盖回来时属于逼牌，不应在前一个
+        // “当前暂时领先”判断中提前吞掉这个分支。
+        if classifiedMoves.contains(where: {
+            guard case .temporaryWin = $0.winClass else { return false }
+            return currentWinnerOpponentBeaten(
+                $0.move,
+                position: position,
+                state: state,
+                evaluator: evaluator
+            )
+        }) {
+            return .forceOpponentCost
+        }
         return .normal
     }
 
@@ -603,7 +643,7 @@ extension AIPlayer {
         }.count
 
         let knownSideWinners = sideCards.filter {
-            $0.rank != .ace && ctx.isEffectivelyBiggest($0, ts: ts, tr: tr)
+            $0.rank != .ace && ctx.isEffectivelyBiggest($0, ts: ts, tr: tr, hand: hand)
         }.count
 
         let slamCount = findSlamLeadCandidates(
@@ -1083,7 +1123,7 @@ extension AIPlayer {
                 cost += isBigTrump(card, ts: ts, tr: tr) ? 50 : 14
             } else {
                 if card.rank == .ace { cost += 12 }
-                if ctx.isEffectivelyBiggest(card, ts: ts, tr: tr) { cost += 10 }
+                if ctx.isEffectivelyBiggest(card, ts: ts, tr: tr, hand: hand) { cost += 10 }
             }
             return cost
         } + structureBreakPenalty(cards: cards, hand: hand, ts: ts, tr: tr) * 20
@@ -1152,6 +1192,145 @@ extension AIPlayer {
     }
 
 
+    /// A point-bearing holding whose points can be realized later without relying on
+    /// the current partner-won trick. These cards should be banked while a riskier
+    /// loser remains in hand.
+    static func isSafeBankedPointWinner(
+        candidate: CardCombination,
+        hand: [Card],
+        gameState: GameState
+    ) -> Bool {
+        guard candidate.cards.contains(where: { $0.pointValue > 0 }),
+              hand.count > candidate.cards.count else { return false }
+
+        let ts = gameState.trumpSuit
+        let tr = gameState.trumpRank
+        let position = gameState.currentTurn
+        let ctx = AIContext.build(state: gameState, ts: ts, tr: tr)
+        guard structureBreakPenalty(cards: candidate.cards, hand: hand, ts: ts, tr: tr) == 0,
+              strongStructureBreakPenalty(cards: candidate.cards, hand: hand, ts: ts, tr: tr) == 0 else {
+            return false
+        }
+        let enemiesOutOfTrump = ctx.allEnemiesVoid(myTeam: position.team, key: "TRUMP")
+        let allTrump = candidate.cards.allSatisfy {
+            CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
+        }
+
+        if allTrump {
+            let candidateIDs = Set(candidate.cards.map(\.id))
+            let remainingTrump = hand.filter {
+                CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
+                    && !candidateIDs.contains($0.id)
+            }
+            let control = candidate.cards.contains { isBigTrump($0, ts: ts, tr: tr) }
+                || strongTrumpCount(in: hand, ts: ts, tr: tr) >= 3
+                || remainingTrump.count >= 3
+            return enemiesOutOfTrump || control
+        }
+
+        guard candidate.cards.allSatisfy({
+            !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
+        }),
+        let suit = candidate.cards.first?.suit,
+        candidate.cards.allSatisfy({ $0.suit == suit }) else { return false }
+
+        // A known void enemy can ruff this winner unless both enemies are known to
+        // have exhausted trump. With no exposed void, the winner can be cashed on
+        // the next initiative opportunity.
+        let ruffThreat = !ctx.voidEnemies(myTeam: position.team, key: suit.rawValue).isEmpty
+            && !enemiesOutOfTrump
+        guard !ruffThreat else { return false }
+
+        switch candidate.pattern {
+        case .single(let card):
+            return card.rank == .ace
+                || ctx.isEffectivelyBiggest(card, ts: ts, tr: tr, hand: hand)
+        case .pair(let first, _):
+            return isEffectivelyBiggestPair(first, hand: hand, ctx: ctx, ts: ts, tr: tr)
+        case .tractor:
+            guard let high = candidate.cards.max(by: {
+                CardComparator.pairOrderValue($0, trumpSuit: ts, trumpRank: tr)
+                    < CardComparator.pairOrderValue($1, trumpSuit: ts, trumpRank: tr)
+            }) else { return false }
+            return isEffectivelyBiggestPair(high, hand: hand, ctx: ctx, ts: ts, tr: tr)
+        case .mixed:
+            return candidate.cards.allSatisfy {
+                $0.rank == .ace || ctx.isEffectivelyBiggest($0, ts: ts, tr: tr, hand: hand)
+            }
+        }
+    }
+
+
+    /// Relative urgency to remove a holding while a teammate has safely banked the
+    /// current trick. Higher values mean the card is more likely to become a future loser.
+    static func futureDiscardRisk(
+        candidate: CardCombination,
+        hand: [Card],
+        gameState: GameState
+    ) -> Double {
+        guard !candidate.cards.isEmpty else { return 0 }
+        let ts = gameState.trumpSuit
+        let tr = gameState.trumpRank
+        let position = gameState.currentTurn
+        let ctx = AIContext.build(state: gameState, ts: ts, tr: tr)
+
+        if isSafeBankedPointWinner(candidate: candidate, hand: hand, gameState: gameState) {
+            return 0
+        }
+
+        var risk = 0.0
+        for card in candidate.cards {
+            if CardComparator.isTrump(card, trumpSuit: ts, trumpRank: tr) {
+                risk += isBigTrump(card, ts: ts, tr: tr) ? 0 : 4
+                continue
+            }
+
+            risk += 24
+            if card.rank.rawValue <= Rank.nine.rawValue { risk += 18 }
+            if !ctx.isEffectivelyBiggest(card, ts: ts, tr: tr, hand: hand) { risk += 20 }
+            if let suit = card.suit {
+                risk += Double(ctx.voidEnemies(myTeam: position.team, key: suit.rawValue).count) * 16
+            }
+            if card.pointValue > 0 { risk -= 8 }
+        }
+
+        let breakCost = structureBreakPenalty(cards: candidate.cards, hand: hand, ts: ts, tr: tr)
+            + strongStructureBreakPenalty(cards: candidate.cards, hand: hand, ts: ts, tr: tr)
+        return max(0, risk / Double(candidate.cards.count) - breakCost * 24)
+    }
+
+
+    static func partnerWonDiscardScore(
+        candidate: CardCombination,
+        hand: [Card],
+        gameState: GameState,
+        trickContext: TrickContext
+    ) -> Double {
+        let points = candidate.cards.reduce(0) { $0 + $1.pointValue }
+        let projectedAttackScore = gameState.attackScore + trickContext.trickPoints + points
+        let currentTeamAttacks = trickContext.position.team != gameState.dealerTeamIdx
+        let locksRound = currentTeamAttacks && gameState.attackScore < 80 && projectedAttackScore >= 80
+        let cardsRequired = gameState.currentTrick.leadCards?.count ?? candidate.cards.count
+        let finalHolding = hand.count <= max(candidate.cards.count, cardsRequired)
+        let risk = futureDiscardRisk(candidate: candidate, hand: hand, gameState: gameState)
+        let safeBanked = isSafeBankedPointWinner(candidate: candidate, hand: hand, gameState: gameState)
+        let candidateIDs = Set(candidate.cards.map(\.id))
+        let hasMoreDangerous = hand
+            .filter { !candidateIDs.contains($0.id) }
+            .contains {
+                let single = CardCombination(cards: [$0], pattern: .single($0))
+                return futureDiscardRisk(candidate: single, hand: hand, gameState: gameState) > risk + 8
+            }
+        let controlLoss = candidate.cards.reduce(0.0) {
+            $0 + discardControlAssetValue($1, hand: hand, state: gameState, ctx: trickContext.memory)
+        }
+
+        var score = Double(points) * 2 + risk - controlLoss * 0.35
+        if safeBanked && hasMoreDangerous && !locksRound && !finalHolding { score -= 120 }
+        return score
+    }
+
+
     static func immediatePointDiscardRiskMultiplier(
         card: Card,
         gameState: GameState,
@@ -1181,7 +1360,8 @@ extension AIPlayer {
         let ts = state.trumpSuit
         let tr = state.trumpRank
         guard CardComparator.isTrump(card, trumpSuit: ts, trumpRank: tr) else {
-            if card.rank == .ace || ctx.isEffectivelyBiggest(card, ts: ts, tr: tr) { return 55 }
+            if card.rank == .ace
+                || ctx.isEffectivelyBiggest(card, ts: ts, tr: tr, hand: hand) { return 55 }
             return 0
         }
 
@@ -1254,7 +1434,7 @@ extension AIPlayer {
         let hasAce = suitCards.contains { $0.rank == .ace }
         let paired = pairContaining(card, in: hand, ts: ts, tr: tr).count >= 2
         let protectedStructure = hasAce || paired || isMixedSlamCore(card, hand: hand, ts: ts, tr: tr)
-        if ctx.isEffectivelyBiggest(card, ts: ts, tr: tr) || protectedStructure {
+        if ctx.isEffectivelyBiggest(card, ts: ts, tr: tr, hand: hand) || protectedStructure {
             return point * (paired ? 4.0 : 2.8)
         }
         return 0
@@ -1309,7 +1489,7 @@ extension AIPlayer {
     static func countSafeBigSideCards(in hand: [Card], ts: Suit?, tr: Rank, ctx: AIContext) -> Int {
         hand.filter {
             !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
-                && ($0.rank == .ace || ctx.isEffectivelyBiggest($0, ts: ts, tr: tr))
+                && ($0.rank == .ace || ctx.isEffectivelyBiggest($0, ts: ts, tr: tr, hand: hand))
         }.count
     }
 
@@ -1558,7 +1738,9 @@ extension AIPlayer {
         }
         guard !suitCards.isEmpty else { return 0 }
         var value = strongestProtectableSidePairValue(in: hand, suit: suit, ts: ts, tr: tr)
-        for card in suitCards where card.rank == .ace || ctx.isEffectivelyBiggest(card, ts: ts, tr: tr) {
+        for card in suitCards
+            where card.rank == .ace
+                || ctx.isEffectivelyBiggest(card, ts: ts, tr: tr, hand: hand) {
             value = max(value, card.rank == .ace ? 40 : 30)
         }
         return value
@@ -1788,7 +1970,9 @@ extension AIPlayer {
             let points = suitCards.reduce(0) { $0 + $1.pointValue }
             value += 2.0
             value += Double(points) / 5.0
-            if suitCards.contains(where: { ctx.isEffectivelyBiggest($0, ts: ts, tr: tr) }) {
+            if suitCards.contains(where: {
+                ctx.isEffectivelyBiggest($0, ts: ts, tr: tr, hand: hand)
+            }) {
                 value += 3.0
             }
         }
@@ -1804,7 +1988,9 @@ extension AIPlayer {
                 $0.suit == suit && !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
             }
             guard !suitCards.isEmpty else { continue }
-            if suitCards.contains(where: { ctx.isEffectivelyBiggest($0, ts: ts, tr: tr) }) {
+            if suitCards.contains(where: {
+                ctx.isEffectivelyBiggest($0, ts: ts, tr: tr, hand: hand)
+            }) {
                 value += 2.0
             }
             if suitCards.count >= 3 { value += 0.8 }
@@ -2061,12 +2247,9 @@ extension AIPlayer {
 
     // MARK: - 后手位置辅助
 
-    /// 判断某张主牌是否适合在「我方绝牌且后手对手也绝花色」时用作安全垫牌
-    /// 安全：大小王、级牌（逻辑强度高，压不走）/ 主花色 A
-    /// 不安全：主花色 K 及以下（容易被后手稍大的主牌截走）
-    /// 判断一张主牌是否"安全"（出了不容易被后手对手用更大主牌顺手截分）
-    /// 始终安全：大王 / 小王 / 级牌 / 主花色 A 及以上
-    /// 动态安全：比该牌大的主花色分牌（K/10/5，排除级牌）已全部出完（双副牌各 2 张）
+    /// 判断当前我方领先是否已被已知信息严格锁定。
+    /// 主牌只有在所有更高主牌的两张副本都已打出或在自己手中时才算安全；
+    /// 牌面类别本身（小王、级牌、主 A）不能替代这一证明。
     static func isTrickSecureForTeam(
         position: PlayerPosition,
         hand: [Card],
@@ -2155,10 +2338,8 @@ extension AIPlayer {
         ctx: AIContext
     ) -> Bool {
         guard CardComparator.isTrump(card, trumpSuit: ts, trumpRank: tr) else { return false }
-        if card.rank == .bigJoker || card.rank == .smallJoker { return true }
-        if card.rank == tr { return true }
-        if card.rank.rawValue >= Rank.ace.rawValue { return true }   // 主花色 A（不含 K）
-
+        // “安全”在调用方会被当作本墩已锁定，因此不能仅凭它属于王、级牌或
+        // 主 A 就近似放行；小王仍会被大王盖，级牌和主 A 也仍有更高主牌。
         return noUnknownHigherTrumpThan(card, hand: hand, ts: ts, tr: tr, ctx: ctx)
     }
 
@@ -2316,17 +2497,7 @@ extension AIPlayer {
         ctx: AIContext
     ) -> Bool {
         guard CardComparator.isTrump(card, trumpSuit: ts, trumpRank: tr) else { return false }
-        if card.rank == .bigJoker || card.rank == .smallJoker { return true }
-        if card.rank == tr { return true }
-
-        guard let suit = card.suit, suit == ts else { return false }
-        let higherRanks = Rank.allCases.filter {
-            !$0.isJoker && $0 != tr && $0.rawValue > card.rank.rawValue
-        }
-        return higherRanks.allSatisfy { rank in
-            let higherCard = Card(suit: suit, rank: rank)
-            return remainingUnknownCopies(of: higherCard, hand: hand, ctx: ctx) == 0
-        }
+        return noUnknownHigherTrumpThan(card, hand: hand, ts: ts, tr: tr, ctx: ctx)
     }
 
 

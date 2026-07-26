@@ -18,12 +18,6 @@ struct GameBoardView: View {
         )
     }
 
-    private var scoreBgColor: Color {
-        state.attackScore >= 80 ? Color.green.opacity(0.55) : Color.black.opacity(0.55)
-    }
-    private var historyBgColor: Color {
-        showHistory ? Color.blue.opacity(0.7) : Color.black.opacity(0.55)
-    }
     private var requiredPlayCardCount: Int? {
         state.currentTrick.leadCards?.count
     }
@@ -87,13 +81,8 @@ struct GameBoardView: View {
                     result: result,
                     teamLevels: state.teamLevels,
                     canStartNext: !engine.multiplayer.isClient,
-                    onNext: {
-                        engine.startNextRound()
-                    },
-                    onQuit: {
-                        engine.multiplayer.leave()
-                        withAnimation { engine.state.phase = .menu }
-                    }
+                    onNext: engine.startNextRound,
+                    onQuit: quitToMenu
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.95)))
             }
@@ -103,94 +92,26 @@ struct GameBoardView: View {
                 GameOverView(
                     teamLevels: state.teamLevels,
                     localTeam: engine.localPlayer.team,
-                    onRestart: { engine.startNewGame() },
-                    onQuit: {
-                        engine.multiplayer.leave()
-                        withAnimation { engine.state.phase = .menu }
-                    }
+                    onRestart: engine.startNewGame,
+                    onQuit: quitToMenu
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.95)))
             }
 
             // ── 常驻顶部浮层：主牌（左上）+ 分数（右上）+ 历史（右上角）
-            VStack(spacing: 0) {
-                HStack(alignment: .center, spacing: 8) {
-                    // 左上：当前主牌
-                    HStack(spacing: 4) {
-                        Text("主")
-                            .font(.system(size: 10))
-                            .foregroundColor(.white.opacity(0.6))
-                        if let suit = state.trumpSuit {
-                            Text(suit.rawValue)
-                                .font(.system(size: 15))
-                                .foregroundColor(suit.color == "red" ? .red : .white)
-                        } else {
-                            Text("—")
-                                .font(.system(size: 12))
-                                .foregroundColor(.white.opacity(0.4))
-                        }
-                        Text(state.trumpRank.display)
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(.yellow)
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.black.opacity(0.55))
-                    .clipShape(Capsule())
-
-                    Spacer()
-
-                    // 右上：攻方得分
-                    HStack(spacing: 4) {
-                        Image(systemName: "star.fill")
-                            .font(.system(size: 9))
-                            .foregroundColor(.yellow)
-                        Text("攻 \(state.attackScore)分")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.white)
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(scoreBgColor)
-                    .clipShape(Capsule())
-
-                    // 历史记录按钮
-                    if !state.completedTricks.isEmpty || !state.declarationEvents.isEmpty {
-                        Button(action: { showHistory.toggle() }) {
-                            HStack(spacing: 3) {
-                                Image(systemName: "clock.arrow.circlepath")
-                                    .font(.system(size: 10))
-                                Text("记录")
-                                    .font(.system(size: 11, weight: .medium))
-                            }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(historyBgColor)
-                            .clipShape(Capsule())
-                        }
-                    }
-
-                    // 音效开关
-                    Button(action: {
-                        soundEnabled.toggle()
-                        SoundManager.shared.soundEnabled = soundEnabled
-                        if !soundEnabled { SoundManager.shared.stopAll() }
-                    }) {
-                        Image(systemName: soundEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                            .font(.system(size: 12))
-                            .foregroundColor(.white)
-                            .padding(6)
-                            .background(Color.black.opacity(0.55))
-                            .clipShape(Circle())
-                    }
-                }
-                .padding(.horizontal, metrics.overlayHorizontalPadding)
-                .padding(.top, metrics.overlayTopPadding)
-
-                Spacer()
-            }
-            .allowsHitTesting(true)
+            GameStatusBar(
+                trumpSuit: state.trumpSuit,
+                trumpRank: state.trumpRank,
+                attackScore: state.attackScore,
+                showsHistoryButton: !state.completedTricks.isEmpty || !state.declarationEvents.isEmpty,
+                isHistoryPresented: showHistory,
+                soundEnabled: soundEnabled,
+                onToggleHistory: toggleHistory,
+                onToggleSound: toggleSound
+            )
+            .padding(.horizontal, metrics.overlayHorizontalPadding)
+            .padding(.top, metrics.overlayTopPadding)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
             // ── 历史出牌记录面板 ─────────────────────────
             if showHistory {
@@ -200,7 +121,7 @@ struct GameBoardView: View {
                     trumpSuit: state.trumpSuit,
                     trumpRank: state.trumpRank,
                     playerNames: state.playerNames,
-                    onClose: { showHistory = false }
+                    onClose: closeHistory
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.97)))
             }
@@ -381,9 +302,7 @@ struct GameBoardView: View {
                 // 换底阶段：紧凑换底栏
                 KittyInfoBar(
                     selectedCount: state.selectedCards.count,
-                    onConfirm: {
-                        engine.confirmKittyExchange(selectedIDs: state.selectedCards)
-                    }
+                    onConfirm: confirmKittyExchange
                 )
                 .opacity(state.phase == .kittyExchange && state.dealerPosition == localPosition ? 1 : 0)
                 .allowsHitTesting(state.phase == .kittyExchange && state.dealerPosition == localPosition)
@@ -402,9 +321,7 @@ struct GameBoardView: View {
                             .minimumScaleFactor(0.75)
                     }
                     Spacer()
-                    Button(action: {
-                        engine.humanPlay(selectedIDs: state.selectedCards)
-                    }) {
+                    Button(action: playSelectedCards) {
                         HStack(spacing: 5) {
                             Image(systemName: "play.fill").font(.caption2)
                             Text(playButtonTitle)
@@ -470,6 +387,122 @@ struct GameBoardView: View {
         let order: [PlayerPosition] = [.south, .west, .north, .east]
         let localIndex = order.firstIndex(of: localPosition) ?? 0
         return order[(localIndex + offset) % order.count]
+    }
+
+    private func toggleHistory() {
+        showHistory.toggle()
+    }
+
+    private func closeHistory() {
+        showHistory = false
+    }
+
+    private func toggleSound() {
+        soundEnabled.toggle()
+        SoundManager.shared.soundEnabled = soundEnabled
+        if !soundEnabled {
+            SoundManager.shared.stopAll()
+        }
+    }
+
+    private func confirmKittyExchange() {
+        engine.confirmKittyExchange(selectedIDs: state.selectedCards)
+    }
+
+    private func playSelectedCards() {
+        engine.humanPlay(selectedIDs: state.selectedCards)
+    }
+
+    private func quitToMenu() {
+        engine.multiplayer.leave()
+        withAnimation {
+            engine.state.phase = .menu
+        }
+    }
+}
+
+private struct GameStatusBar: View {
+    let trumpSuit: Suit?
+    let trumpRank: Rank
+    let attackScore: Int
+    let showsHistoryButton: Bool
+    let isHistoryPresented: Bool
+    let soundEnabled: Bool
+    let onToggleHistory: () -> Void
+    let onToggleSound: () -> Void
+
+    private var scoreBackgroundColor: Color {
+        attackScore >= 80 ? Color.green.opacity(0.55) : Color.black.opacity(0.55)
+    }
+
+    private var historyBackgroundColor: Color {
+        isHistoryPresented ? Color.blue.opacity(0.7) : Color.black.opacity(0.55)
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            HStack(spacing: 4) {
+                Text("主")
+                    .font(.system(size: 10))
+                    .foregroundColor(.white.opacity(0.6))
+                if let trumpSuit {
+                    Text(trumpSuit.rawValue)
+                        .font(.system(size: 15))
+                        .foregroundColor(trumpSuit.color == "red" ? .red : .white)
+                } else {
+                    Text("—")
+                        .font(.system(size: 12))
+                        .foregroundColor(.white.opacity(0.4))
+                }
+                Text(trumpRank.display)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.yellow)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.black.opacity(0.55))
+            .clipShape(Capsule())
+
+            Spacer()
+
+            HStack(spacing: 4) {
+                Image(systemName: "star.fill")
+                    .font(.system(size: 9))
+                    .foregroundColor(.yellow)
+                Text("攻 \(attackScore)分")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(scoreBackgroundColor)
+            .clipShape(Capsule())
+
+            if showsHistoryButton {
+                Button(action: onToggleHistory) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 10))
+                        Text("记录")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(historyBackgroundColor)
+                    .clipShape(Capsule())
+                }
+            }
+
+            Button(action: onToggleSound) {
+                Image(systemName: soundEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                    .font(.system(size: 12))
+                    .foregroundColor(.white)
+                    .padding(6)
+                    .background(Color.black.opacity(0.55))
+                    .clipShape(Circle())
+            }
+        }
     }
 }
 

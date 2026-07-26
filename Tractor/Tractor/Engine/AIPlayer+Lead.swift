@@ -17,6 +17,26 @@ extension AIPlayer {
         let ts = state.trumpSuit
         let tr = state.trumpRank
 
+        if let bottomControlLead = knownPointKittyEndgameLead(
+            position: position,
+            hand: hand,
+            state: state,
+            evaluator: evaluator,
+            ctx: ctx
+        ) {
+            return bottomControlLead
+        }
+
+        if let preserved = endgameControlPreservationLead(
+            position: position,
+            hand: hand,
+            state: state,
+            evaluator: evaluator,
+            ctx: ctx
+        ) {
+            return preserved
+        }
+
         let assets = filterAllowedLeadAssets(
             deduplicatedLeadAssets(
                 buildLeadAssets(position: position, hand: hand, state: state, ctx: ctx)
@@ -75,7 +95,7 @@ extension AIPlayer {
         // ── 1. 当前"已是最大"的非主牌中，优先出对子 ──────────────
         // 按花色分组，找有"当前最大"牌的花色（且不是敌方已绝的花色）
         var biggestBySuit: [Suit: [Card]] = [:]
-        for card in sideCards where ctx.isEffectivelyBiggest(card, ts: ts, tr: tr) {
+        for card in sideCards where ctx.isEffectivelyBiggest(card, ts: ts, tr: tr, hand: hand) {
             guard let suit = card.suit else { continue }
             let key = AIContext.suitKey(card, ts: ts, tr: tr)
             // 敌方已全绝此花色，领出无意义（对方会将吃）
@@ -337,22 +357,29 @@ extension AIPlayer {
         let points = Double(cards.reduce(0) { $0 + $1.pointValue })
         let security = leadWinProbability(cards, hand: hand, ts: ts, tr: tr, ctx: ctx)
         let pointPressure = pointPressureBonus(totalPoints: Int(points))
+        let endgameAdjustment = endgameControlPreservationScoreAdjustment(
+            move,
+            position: position,
+            hand: hand,
+            state: state
+        )
 
+        let base: Double
         switch tier {
         case .cashingWinner:
-            return 400
+            base = 400
                 + points * 8 * pointPressure
                 + security * 90
                 + Double(cards.count) * 18
-                + sideSuitUrgency(cards, position: position, ts: ts, tr: tr, ctx: ctx)
+                + sideSuitUrgency(cards, position: position, hand: hand, ts: ts, tr: tr, ctx: ctx)
         case .safeControlGroup:
-            return 320
+            base = 320
                 + security * 85
                 + Double(cards.count) * 24
                 + points * 5
                 + mixedSlamControlValue(cards, hand: hand, ts: ts, tr: tr, ctx: ctx) * 55
         case .strongStructure:
-            return 240
+            base = 240
                 + security * 70
                 + points * 4
                 + wholeStructureControlValue(cards, hand: hand, ts: ts, tr: tr, ctx: ctx) * 80
@@ -368,15 +395,561 @@ extension AIPlayer {
             if isTrumpLead(move, ts: ts, tr: tr) {
                 s += delayedSideRealizationValue(position: position, hand: hand, state: state, ctx: ctx) * 1.2
             }
-            return s
+            base = s
         case .weakDisposal:
             let breakCost = structureFragmentationCost(cards, hand: hand, ts: ts, tr: tr)
-            return 40
+            base = 40
                 - points * 6
                 - breakCost * 45
                 - Double(cards.count - 1) * 8
                 + (clearsSideSuitForLead(cards, hand: hand, ts: ts, tr: tr) ? 15 : 0)
         }
+        return base + endgameAdjustment
+    }
+
+
+    // MARK: - Endgame Control Asset Preservation
+
+    static func identifyEndgameControlAssets(
+        hand: [Card],
+        gameState: GameState
+    ) -> [EndgameControlAsset] {
+        let ts = gameState.trumpSuit
+        let tr = gameState.trumpRank
+        let ctx = AIContext.build(state: gameState, ts: ts, tr: tr)
+        let likelyNoTrump = opponentsLikelyNoTrumpOrControl(gameState: gameState)
+        let estimatedBottom = estimatedBottomCaptureValue(
+            position: gameState.currentTurn,
+            hand: hand,
+            state: gameState,
+            ctx: ctx
+        )
+        var assets: [EndgameControlAsset] = []
+
+        func addAsset(cards: [Card], isTrumpBased: Bool, isStructureBased: Bool, winProbability: Double) {
+            guard !cards.isEmpty else { return }
+            let pattern = playPattern(for: cards, ts: ts, tr: tr)
+            let trickCount = max(1, cards.count / max(1, pattern.count))
+            let breakCost = structureBreakPenalty(cards: cards, hand: hand, ts: ts, tr: tr)
+                + strongStructureBreakPenalty(cards: cards, hand: hand, ts: ts, tr: tr)
+            assets.append(EndgameControlAsset(
+                combination: CardCombination(cards: cards, pattern: pattern),
+                winProbability: winProbability,
+                trickCountCovered: trickCount,
+                bottomPointCapturePotential: estimatedBottom,
+                structureBreakCost: breakCost,
+                isTrumpBased: isTrumpBased,
+                isStructureBased: isStructureBased
+            ))
+        }
+
+        let trump = trumpCards(in: hand, ts: ts, tr: tr)
+        for tractor in tractors(in: trump, pairCount: 2, trumpSuit: ts, trumpRank: tr) {
+            let probability = likelyNoTrump ? 0.96 : leadWinProbability(tractor, hand: hand, ts: ts, tr: tr, ctx: ctx)
+            addAsset(cards: tractor, isTrumpBased: true, isStructureBased: true, winProbability: probability)
+        }
+
+        for pair in pairs(in: trump, trumpSuit: ts, trumpRank: tr) {
+            guard let rep = pairRepresentative(of: pair, trumpSuit: ts, trumpRank: tr) else { continue }
+            guard isBigTrump(rep, ts: ts, tr: tr) || likelyNoTrump || hand.count <= 3 else { continue }
+            let probability = likelyNoTrump ? 0.94 : leadWinProbability(pair, hand: hand, ts: ts, tr: tr, ctx: ctx)
+            addAsset(cards: pair, isTrumpBased: true, isStructureBased: true, winProbability: probability)
+        }
+
+        let pairedTrumpIDs = pairedCardIDs(in: trump, trumpSuit: ts, trumpRank: tr)
+        for card in trump where !pairedTrumpIDs.contains(card.id) {
+            guard isBigTrump(card, ts: ts, tr: tr) || likelyNoTrump else { continue }
+            let probability = likelyNoTrump ? 0.88 : leadWinProbability([card], hand: hand, ts: ts, tr: tr, ctx: ctx)
+            addAsset(cards: [card], isTrumpBased: true, isStructureBased: false, winProbability: probability)
+        }
+
+        for suit in Suit.allCases {
+            let suitCards = hand.filter {
+                $0.suit == suit && !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
+            }
+            guard !suitCards.isEmpty else { continue }
+
+            for tractor in tractors(in: suitCards, pairCount: 2, trumpSuit: ts, trumpRank: tr) {
+                guard let info = tractorInfo(of: tractor, trumpSuit: ts, trumpRank: tr),
+                      isEffectivelyBiggestPair(info.highCard, hand: hand, ctx: ctx, ts: ts, tr: tr),
+                      likelyNoTrump else { continue }
+                addAsset(cards: tractor, isTrumpBased: false, isStructureBased: true, winProbability: 0.86)
+            }
+
+            for pair in pairs(in: suitCards, trumpSuit: ts, trumpRank: tr) {
+                guard let rep = pairRepresentative(of: pair, trumpSuit: ts, trumpRank: tr),
+                      isEffectivelyBiggestPair(rep, hand: hand, ctx: ctx, ts: ts, tr: tr),
+                      likelyNoTrump else { continue }
+                addAsset(cards: pair, isTrumpBased: false, isStructureBased: true, winProbability: 0.82)
+            }
+        }
+
+        var byKey: [String: EndgameControlAsset] = [:]
+        for asset in assets where asset.winProbability >= 0.65 {
+            let key = moveKey(asset.combination.cards)
+            if let existing = byKey[key] {
+                if endgameControlValue(asset, position: nil, state: gameState)
+                    > endgameControlValue(existing, position: nil, state: gameState) {
+                    byKey[key] = asset
+                }
+            } else {
+                byKey[key] = asset
+            }
+        }
+        return Array(byKey.values)
+    }
+
+
+    static func shouldPreserveEndgameControlAsset(
+        aiPlayer: Player,
+        hand: [Card],
+        gameState: GameState
+    ) -> Bool {
+        guard hand.count <= 5 else { return false }
+        let ts = gameState.trumpSuit
+        let tr = gameState.trumpRank
+        let sideCards = hand.filter { !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr) }
+        guard !sideCards.isEmpty else { return false }
+
+        let assets = identifyEndgameControlAssets(hand: hand, gameState: gameState)
+        guard !assets.isEmpty else { return false }
+        let likelyNoTrump = opponentsLikelyNoTrumpOrControl(gameState: gameState)
+        guard likelyNoTrump || hand.count <= 3 else { return false }
+        guard assets.contains(where: { $0.winProbability >= (likelyNoTrump ? 0.72 : 0.82) }) else { return false }
+
+        if hand.count <= 3 { return true }
+        if canPotentiallyCaptureBottom(position: aiPlayer.position, hand: hand, state: gameState, assets: assets) {
+            return true
+        }
+        return sideCards.contains { $0.pointValue == 0 }
+    }
+
+
+    static func opponentsLikelyNoTrumpOrControl(gameState: GameState) -> Bool {
+        let ts = gameState.trumpSuit
+        let tr = gameState.trumpRank
+        let ctx = AIContext.build(state: gameState, ts: ts, tr: tr)
+        let activePosition = gameState.currentTurn
+        let totalTrump = Deck.doubleDeck().filter {
+            CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
+        }.count
+        let playedTrump = ctx.playedCards.filter {
+            CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
+        }.count
+        let trumpVoidEnemyCount = ctx.voidEnemies(
+            myTeam: activePosition.team,
+            key: "TRUMP"
+        ).count
+        let trumpLeadTricks = gameState.completedTricks.filter { trick in
+            guard let first = trick.plays.first?.cards.first else { return false }
+            return CardComparator.isTrump(first, trumpSuit: ts, trumpRank: tr)
+        }
+        let recentTrumpLeadVoids = trumpLeadTricks.suffix(3).reduce(0) { partial, trick in
+            guard let lead = trick.plays.first else { return partial }
+            return partial + trick.plays.filter {
+                $0.position != lead.position
+                    && $0.position.team != activePosition.team
+                    && $0.cards.first.map {
+                        !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
+                    } ?? false
+            }.count
+        }
+        let playedRatio = totalTrump == 0 ? 1.0 : Double(playedTrump) / Double(totalTrump)
+        let bigTrumpTotal = Deck.doubleDeck().filter {
+            $0.rank == .bigJoker || $0.rank == .smallJoker || $0.rank == tr
+        }.count
+        let bigTrumpPlayed = ctx.playedCards.filter {
+            $0.rank == .bigJoker || $0.rank == .smallJoker || $0.rank == tr
+        }.count
+
+        return trumpVoidEnemyCount == 2
+            || recentTrumpLeadVoids >= 3
+            || playedRatio >= 0.72
+            || (playedRatio >= 0.6 && bigTrumpPlayed >= max(1, bigTrumpTotal - 2))
+    }
+
+
+    /// 已确认底牌有分、且两个对手都已经暴露无主时，残局不再继续吊主。
+    /// 优先处理副牌，保留至少一手主牌控制来争取最后一墩。
+    static func knownPointKittyEndgameLead(
+        position: PlayerPosition,
+        hand: [Card],
+        state: GameState,
+        evaluator: TrickEvaluator,
+        ctx: AIContext
+    ) -> [Card]? {
+        guard hand.count <= 8,
+              ctx.allEnemiesVoid(myTeam: position.team, key: "TRUMP"),
+              case .knownPositive = kittyPointKnowledge(
+                position: position,
+                hand: hand,
+                state: state,
+                ctx: ctx
+              ) else {
+            return nil
+        }
+
+        let ts = state.trumpSuit
+        let tr = state.trumpRank
+        let hasTrumpControl = hand.contains {
+            CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
+        }
+        let hasSideCard = hand.contains {
+            !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
+        }
+        guard hasTrumpControl, hasSideCard else { return nil }
+
+        let assets = identifyEndgameControlAssets(hand: hand, gameState: state)
+        let candidates = endgameSideDisposalLeadAssets(
+            position: position,
+            hand: hand,
+            state: state,
+            ctx: ctx,
+            protectedAssets: assets
+        )
+        return bestEndgameSideDisposalLead(
+            candidates,
+            position: position,
+            hand: hand,
+            state: state,
+            evaluator: evaluator,
+            ctx: ctx
+        )
+    }
+
+
+    static func endgameControlPreservationLead(
+        position: PlayerPosition,
+        hand: [Card],
+        state: GameState,
+        evaluator: TrickEvaluator,
+        ctx: AIContext
+    ) -> [Card]? {
+        guard shouldPreserveEndgameControlAsset(
+            aiPlayer: state.player(position),
+            hand: hand,
+            gameState: state
+        ) else { return nil }
+
+        let assets = identifyEndgameControlAssets(hand: hand, gameState: state)
+        let candidates = endgameSideDisposalLeadAssets(
+            position: position,
+            hand: hand,
+            state: state,
+            ctx: ctx,
+            protectedAssets: assets
+        )
+        return bestEndgameSideDisposalLead(
+            candidates,
+            position: position,
+            hand: hand,
+            state: state,
+            evaluator: evaluator,
+            ctx: ctx
+        )
+    }
+
+
+    static func bestEndgameSideDisposalLead(
+        _ candidates: [LeadAsset],
+        position: PlayerPosition,
+        hand: [Card],
+        state: GameState,
+        evaluator: TrickEvaluator,
+        ctx: AIContext
+    ) -> [Card]? {
+        guard !candidates.isEmpty else { return nil }
+        let topAssets = Array(candidates.sorted {
+            if $0.score != $1.score { return $0.score > $1.score }
+            return leadAssetTieBreakScore($0.move, hand: hand, state: state, ctx: ctx)
+                > leadAssetTieBreakScore($1.move, hand: hand, state: state, ctx: ctx)
+        }.prefix(monteCarloTopMoveCount))
+        let heuristicScores = Dictionary(
+            uniqueKeysWithValues: topAssets.map { (moveKey($0.move.cards), $0.score) }
+        )
+        return monteCarloBestMove(
+            from: topAssets.map(\.move),
+            position: position,
+            hand: hand,
+            state: state,
+            evaluator: evaluator,
+            heuristicScore: { heuristicScores[moveKey($0.cards)] ?? 0 }
+        )?.cards ?? topAssets.first?.move.cards
+    }
+
+
+    static func endgameSideDisposalLeadAssets(
+        position: PlayerPosition,
+        hand: [Card],
+        state: GameState,
+        ctx: AIContext,
+        protectedAssets: [EndgameControlAsset]
+    ) -> [LeadAsset] {
+        let ts = state.trumpSuit
+        let tr = state.trumpRank
+        let protectedIDs = Set(protectedAssets.flatMap { $0.combination.cards.map(\.id) })
+        let sideCards = hand.filter { !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr) }
+        guard !sideCards.isEmpty else { return [] }
+
+        let pairedSideIDs = pairedCardIDs(in: sideCards, trumpSuit: ts, trumpRank: tr)
+        let singletonCandidates = sideCards
+            .filter { !protectedIDs.contains($0.id) && !pairedSideIDs.contains($0.id) }
+            .sorted { endgameSideDisposalSort($0, $1, hand: hand, state: state, ctx: ctx) }
+
+        var moves = singletonCandidates.map { AIMove(cards: [$0], kind: .weak) }
+
+        if moves.isEmpty {
+            let weakPairs = pairs(in: sideCards, trumpSuit: ts, trumpRank: tr)
+                .filter { pair in
+                    let ids = Set(pair.map(\.id))
+                    return ids.isDisjoint(with: protectedIDs)
+                        && tractorInfo(of: pair, trumpSuit: ts, trumpRank: tr) == nil
+                }
+                .sorted {
+                    guard let a = pairRepresentative(of: $0, trumpSuit: ts, trumpRank: tr),
+                          let b = pairRepresentative(of: $1, trumpSuit: ts, trumpRank: tr) else { return false }
+                    return endgameSideDisposalSort(a, b, hand: hand, state: state, ctx: ctx)
+                }
+            moves += weakPairs.map { AIMove(cards: $0, kind: .weak) }
+        }
+
+        if moves.isEmpty {
+            moves = sideCards
+                .sorted { endgameSideDisposalSort($0, $1, hand: hand, state: state, ctx: ctx) }
+                .map { AIMove(cards: [$0], kind: .weak) }
+        }
+
+        return deduplicatedMoves(moves).map { move in
+            let adjustment = endgameControlPreservationScoreAdjustment(
+                move,
+                position: position,
+                hand: hand,
+                state: state
+            )
+            let score = 260
+                + adjustment
+                - Double(move.cards.reduce(0) { $0 + $1.pointValue }) * 4
+                - structureBreakPenalty(cards: move.cards, hand: hand, ts: ts, tr: tr) * 120
+                + (clearsSideSuitForLead(move.cards, hand: hand, ts: ts, tr: tr) ? 35 : 0)
+            return LeadAsset(move: move, tier: .weakDisposal, score: score)
+        }
+    }
+
+
+    static func endgameSideDisposalSort(
+        _ lhs: Card,
+        _ rhs: Card,
+        hand: [Card],
+        state: GameState,
+        ctx: AIContext
+    ) -> Bool {
+        let ts = state.trumpSuit
+        let tr = state.trumpRank
+        let lPoint = lhs.pointValue
+        let rPoint = rhs.pointValue
+        if lPoint != rPoint { return lPoint < rPoint }
+        let lBreak = structureBreakPenalty(cards: [lhs], hand: hand, ts: ts, tr: tr)
+            + strongStructureBreakPenalty(cards: [lhs], hand: hand, ts: ts, tr: tr)
+        let rBreak = structureBreakPenalty(cards: [rhs], hand: hand, ts: ts, tr: tr)
+            + strongStructureBreakPenalty(cards: [rhs], hand: hand, ts: ts, tr: tr)
+        if lBreak != rBreak { return lBreak < rBreak }
+        let lBig = ctx.isEffectivelyBiggest(lhs, ts: ts, tr: tr, hand: hand)
+        let rBig = ctx.isEffectivelyBiggest(rhs, ts: ts, tr: tr, hand: hand)
+        if lBig != rBig { return !lBig }
+        return weakerCard(lhs, than: rhs, trumpSuit: ts, trumpRank: tr)
+    }
+
+
+    static func endgameControlPreservationScoreAdjustment(
+        _ move: AIMove,
+        position: PlayerPosition,
+        hand: [Card],
+        state: GameState
+    ) -> Double {
+        guard hand.count <= 5 else { return 0 }
+        let ts = state.trumpSuit
+        let tr = state.trumpRank
+        let assets = identifyEndgameControlAssets(hand: hand, gameState: state)
+        guard !assets.isEmpty else { return 0 }
+
+        let moveIDs = Set(move.cards.map(\.id))
+        let assetValue = assets.reduce(0.0) {
+            $0 + endgameControlValue($1, position: position, state: state)
+        }
+        let preserveMultiplier = position.team != state.dealerTeamIdx
+            && canPotentiallyCaptureBottom(position: position, hand: hand, state: state, assets: assets)
+            ? 2.0
+            : 1.0
+
+        let consumedValue = assets.reduce(0.0) { partial, asset in
+            let ids = Set(asset.combination.cards.map(\.id))
+            guard !ids.isDisjoint(with: moveIDs) else { return partial }
+            let partialUse = !ids.isSubset(of: moveIDs)
+            let structuralMultiplier = asset.isStructureBased && partialUse ? 1.7 : 1.0
+            return partial + endgameControlValue(asset, position: position, state: state) * structuralMultiplier
+        }
+        if consumedValue > 0 {
+            return -consumedValue * preserveMultiplier
+        }
+
+        if move.cards.allSatisfy({ !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr) }) {
+            return min(160, assetValue * 0.35 * preserveMultiplier)
+        }
+        return 0
+    }
+
+
+    static func endgameControlValue(
+        _ asset: EndgameControlAsset,
+        position: PlayerPosition?,
+        state: GameState
+    ) -> Double {
+        let futurePoints = 10.0 + Double(asset.combination.cards.reduce(0) { $0 + $1.pointValue })
+        let bottomValue = Double(asset.bottomPointCapturePotential)
+        let attackerMultiplier = position.map { $0.team != state.dealerTeamIdx } == true ? 2.0 : 1.0
+        return asset.winProbability
+            * Double(asset.trickCountCovered)
+            * (futurePoints + bottomValue * attackerMultiplier)
+            - asset.structureBreakCost * 45
+    }
+
+
+    static func canPotentiallyCaptureBottom(
+        position: PlayerPosition,
+        hand: [Card],
+        state: GameState,
+        assets: [EndgameControlAsset]
+    ) -> Bool {
+        guard position.team != state.dealerTeamIdx,
+              !assets.isEmpty,
+              hand.count <= 5,
+              assets.contains(where: { $0.winProbability >= 0.72 }) else {
+            return false
+        }
+        let ctx = AIContext.build(state: state, ts: state.trumpSuit, tr: state.trumpRank)
+        return kittyPointKnowledge(
+            position: position,
+            hand: hand,
+            state: state,
+            ctx: ctx
+        ) != .knownZero
+    }
+
+
+    static func estimatedBottomCaptureValue(
+        position: PlayerPosition,
+        hand: [Card],
+        state: GameState,
+        ctx: AIContext
+    ) -> Int {
+        switch kittyPointKnowledge(
+            position: position,
+            hand: hand,
+            state: state,
+            ctx: ctx
+        ) {
+        case .knownPositive(let points):
+            return points * 2
+        case .knownZero:
+            return 0
+        case .unknown:
+            return 30
+        }
+    }
+
+
+    /// AI 对底牌分数的合法知识边界：
+    /// - 庄家知道自己埋下的底牌，可确认有分或 0 分；
+    /// - 非庄家只有在牌张记忆能确定时才返回已知结果，不能直接读取真实底牌；
+    /// - 其余情况保持 unknown。
+    static func kittyPointKnowledge(
+        position: PlayerPosition,
+        hand: [Card],
+        state: GameState,
+        ctx: AIContext
+    ) -> KittyPointKnowledge {
+        if position == state.dealerPosition {
+            let points = state.kitty.reduce(0) { $0 + $1.pointValue }
+            return points > 0 ? .knownPositive(points) : .knownZero
+        }
+
+        var seenIDs = Set<UUID>()
+        let knownCards = (ctx.knownCards + hand).filter {
+            seenIDs.insert($0.id).inserted
+        }
+        let pointDeck = Deck.doubleDeck().filter { $0.pointValue > 0 }
+
+        let totalPointCounts = Dictionary(grouping: pointDeck, by: cardFaceKey)
+            .mapValues(\.count)
+        let knownPointCounts = Dictionary(
+            grouping: knownCards.filter { $0.pointValue > 0 },
+            by: cardFaceKey
+        ).mapValues(\.count)
+
+        let allPointCardsAccountedFor = totalPointCounts.allSatisfy { face, total in
+            (knownPointCounts[face] ?? 0) >= total
+        }
+        if allPointCardsAccountedFor {
+            return .knownZero
+        }
+
+        let otherPlayers = PlayerPosition.allCases.filter { $0 != position }
+        var guaranteedPoints = 0
+        for (face, deckCards) in Dictionary(grouping: pointDeck, by: cardFaceKey) {
+            guard let representative = deckCards.first else { continue }
+            let logicalSuit = AIContext.suitKey(
+                representative,
+                ts: state.trumpSuit,
+                tr: state.trumpRank
+            )
+            guard otherPlayers.allSatisfy({
+                ctx.isVoid($0, key: logicalSuit)
+            }) else {
+                continue
+            }
+            let remainingCount = max(
+                0,
+                deckCards.count - (knownPointCounts[face] ?? 0)
+            )
+            guaranteedPoints += remainingCount * representative.pointValue
+        }
+
+        return guaranteedPoints > 0
+            ? .knownPositive(guaranteedPoints)
+            : .unknown
+    }
+
+
+    static func cardFaceKey(_ card: Card) -> String {
+        "\(card.suit?.rawValue ?? "JOKER"):\(card.rank.rawValue)"
+    }
+
+
+    static func playPattern(for cards: [Card], ts: Suit?, tr: Rank) -> PlayPattern {
+        if let info = tractorInfo(of: cards, trumpSuit: ts, trumpRank: tr) {
+            var grouped: [String: [Card]] = [:]
+            for card in cards {
+                grouped[pairKey(card, trumpSuit: ts, trumpRank: tr), default: []].append(card)
+            }
+            let orderedPairs = grouped.values
+                .filter { $0.count >= 2 }
+                .map { Array($0.prefix(2)) }
+                .sorted {
+                    CardComparator.pairOrderValue($0[0], trumpSuit: ts, trumpRank: tr)
+                        < CardComparator.pairOrderValue($1[0], trumpSuit: ts, trumpRank: tr)
+                }
+            if orderedPairs.count == info.pairCount {
+                return .tractor(orderedPairs.map { ($0[0], $0[1]) })
+            }
+        }
+        if cards.count == 2,
+           pairRepresentative(of: cards, trumpSuit: ts, trumpRank: tr) != nil {
+            return .pair(cards[0], cards[1])
+        }
+        if cards.count == 1, let card = cards.first {
+            return .single(card)
+        }
+        return .mixed(cards)
     }
 
 
@@ -442,7 +1015,9 @@ extension AIPlayer {
             return false
         }
 
-        if cards.contains(where: { $0.rank == .ace || ctx.isEffectivelyBiggest($0, ts: ts, tr: tr) }) {
+        if cards.contains(where: {
+            $0.rank == .ace || ctx.isEffectivelyBiggest($0, ts: ts, tr: tr, hand: hand)
+        }) {
             return true
         }
         return pairs(in: cards, trumpSuit: ts, trumpRank: tr).contains { pair in
@@ -455,6 +1030,7 @@ extension AIPlayer {
     static func sideSuitUrgency(
         _ cards: [Card],
         position: PlayerPosition,
+        hand: [Card],
         ts: Suit?,
         tr: Rank,
         ctx: AIContext
@@ -468,7 +1044,9 @@ extension AIPlayer {
         let voidEnemies = Double(ctx.voidEnemies(myTeam: position.team, key: suit.rawValue).count)
         var urgency = 35.0 - voidEnemies * 22.0
         if cards.contains(where: { $0.rank == .ace }) { urgency += 25 }
-        if cards.contains(where: { ctx.isEffectivelyBiggest($0, ts: ts, tr: tr) }) { urgency += 20 }
+        if cards.contains(where: {
+            ctx.isEffectivelyBiggest($0, ts: ts, tr: tr, hand: hand)
+        }) { urgency += 20 }
         urgency += Double(ctx.unplayedSuitPoints(suit: suit, tr: tr)) * 0.8
         return urgency
     }
@@ -601,7 +1179,7 @@ extension AIPlayer {
         let sideCards = hand.filter { !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr) }
         let pairedIDs = pairedCardIDs(in: sideCards, trumpSuit: ts, trumpRank: tr)
         var bySuit: [Suit: [Card]] = [:]
-        for card in sideCards where ctx.isEffectivelyBiggest(card, ts: ts, tr: tr) {
+        for card in sideCards where ctx.isEffectivelyBiggest(card, ts: ts, tr: tr, hand: hand) {
             guard let suit = card.suit else { continue }
             if ctx.allEnemiesVoid(myTeam: myTeam, key: suit.rawValue) { continue }
             bySuit[suit, default: []].append(card)
@@ -836,7 +1414,9 @@ extension AIPlayer {
             return min(0.95, 0.35 + Double(high) / 120.0)
         }
 
-        let allBig = cards.allSatisfy { ctx.isEffectivelyBiggest($0, ts: ts, tr: tr) }
+        let allBig = cards.allSatisfy {
+            ctx.isEffectivelyBiggest($0, ts: ts, tr: tr, hand: hand)
+        }
         if allBig { return 0.78 }
         if cards.contains(where: { $0.rank == .ace }) { return 0.62 }
         let high = cards.map(\.rank.rawValue).max() ?? 0

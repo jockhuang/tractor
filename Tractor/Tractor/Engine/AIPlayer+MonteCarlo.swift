@@ -38,14 +38,12 @@ extension AIPlayer {
         var bestMove: AIMove?
         var bestScore = -Double.infinity
 
-        for (moveIndex, move) in moves.enumerated() {
+        for move in moves {
             var total = 0.0
             for simulation in 0..<monteCarloSimulationCount {
                 var rng = MonteCarloRNG(seed: monteCarloSeed(
-                    move: move,
                     position: position,
                     state: state,
-                    moveIndex: moveIndex,
                     simulation: simulation
                 ))
                 total += simulateCurrentTrick(
@@ -72,23 +70,15 @@ extension AIPlayer {
 
 
     static func monteCarloSeed(
-        move: AIMove,
         position: PlayerPosition,
         state: GameState,
-        moveIndex: Int,
         simulation: Int
     ) -> UInt64 {
         var seed = UInt64(position.rawValue + 1) &* 0x9E37_79B9
         seed ^= UInt64(state.roundNumber + 1) &* 0x85EB_CA6B
         seed ^= UInt64(state.completedTricks.count + 1) &* 0xC2B2_AE35
         seed ^= UInt64(state.currentTrick.plays.count + 1) &* 0x27D4_EB2F
-        seed ^= UInt64(moveIndex + 1) &* 0x1656_67B1
         seed ^= UInt64(simulation + 1) &* 0xD3A2_646C
-        for card in move.cards {
-            let suitValue = UInt64(card.suit?.rawValue.unicodeScalars.first?.value ?? 0)
-            seed ^= UInt64(card.rank.rawValue + 31) &* 0x9E37_79B9
-            seed ^= suitValue &* 0x85EB_CA6B
-        }
         return seed
     }
 
@@ -346,8 +336,6 @@ extension AIPlayer {
             }
         }
 
-        unknownDeck.shuffle(using: &rng)
-
         var hands: [PlayerPosition: [Card]] = [:]
         let playedIDs = Set(playedCandidate.map(\.id))
         hands[currentPosition] = currentHand.filter { !playedIDs.contains($0.id) }
@@ -360,28 +348,127 @@ extension AIPlayer {
             need[pos] = max(0, state.player(pos).hand.count - (hands[pos]?.count ?? 0))
         }
 
-        func isVoidFor(_ pos: PlayerPosition, _ card: Card) -> Bool {
-            voids[pos]?.contains(AIContext.suitKey(card, ts: ts, tr: tr)) ?? false
+        // 非庄家视角中未知池还包含底牌。把底牌作为一个有明确容量、可接收
+        // 任意花色的合法接收方，而不是在玩家约束冲突时才临时丢牌。
+        let totalPlayerNeed = need.values.reduce(0, +)
+        var kittyNeed = max(0, unknownDeck.count - totalPlayerNeed)
+
+        // 绝门约束只依赖逻辑花色。按花色成组分配，把问题缩小成最多五组牌
+        // 对三家手牌容量和底牌容量的整数分配；回溯保证不会为了终止而违约。
+        let groupedDeck = Dictionary(grouping: unknownDeck) {
+            AIContext.suitKey($0, ts: ts, tr: tr)
+        }
+        var suitGroups = groupedDeck.map { key, cards in
+            (key: key, cards: cards)
+        }
+        suitGroups.sort { lhs, rhs in
+            let lhsEligible = others.filter {
+                !(voids[$0]?.contains(lhs.key) ?? false)
+            }.count
+            let rhsEligible = others.filter {
+                !(voids[$0]?.contains(rhs.key) ?? false)
+            }.count
+            if lhsEligible != rhsEligible { return lhsEligible < rhsEligible }
+            if lhs.cards.count != rhs.cards.count { return lhs.cards.count > rhs.cards.count }
+            return lhs.key < rhs.key
+        }
+        for index in suitGroups.indices {
+            suitGroups[index].cards.shuffle(using: &rng)
         }
 
-        // 受绝门约束更紧（能接收的对手更少）的牌优先分配，避免后期死局
-        let ordered = unknownDeck.sorted { a, b in
-            others.filter { p in !isVoidFor(p, a) }.count
-                < others.filter { p in !isVoidFor(p, b) }.count
-        }
+        func possibleDistributions(
+            cardCount: Int,
+            eligiblePlayers: [PlayerPosition],
+            kittyCapacity: Int
+        ) -> [[Int]] {
+            let recipientCount = eligiblePlayers.count + (kittyCapacity > 0 ? 1 : 0)
+            guard recipientCount > 0 else { return [] }
+            var result: [[Int]] = []
+            var current = Array(repeating: 0, count: recipientCount)
 
-        for card in ordered {
-            // 仍需补牌、且不绝该花色的对手
-            var eligible = others.filter { (need[$0] ?? 0) > 0 && !isVoidFor($0, card) }
-            // 没有满足绝门约束的对手时退化为任何仍需补牌的对手（保证终止）
-            if eligible.isEmpty {
-                eligible = others.filter { (need[$0] ?? 0) > 0 }
+            func build(_ recipientIndex: Int, _ remaining: Int) {
+                if recipientIndex == recipientCount {
+                    if remaining == 0 { result.append(current) }
+                    return
+                }
+
+                let isKitty = recipientIndex == eligiblePlayers.count
+                    && kittyCapacity > 0
+                let capacity = isKitty
+                    ? kittyCapacity
+                    : (need[eligiblePlayers[recipientIndex]] ?? 0)
+                let remainingCapacity = ((recipientIndex + 1)..<recipientCount).reduce(0) {
+                    partial, index in
+                    let indexIsKitty = index == eligiblePlayers.count
+                        && kittyCapacity > 0
+                    return partial + (indexIsKitty
+                        ? kittyCapacity
+                        : (need[eligiblePlayers[index]] ?? 0))
+                }
+                let minimum = max(0, remaining - remainingCapacity)
+                let maximum = min(capacity, remaining)
+                guard minimum <= maximum else { return }
+                for amount in minimum...maximum {
+                    current[recipientIndex] = amount
+                    build(recipientIndex + 1, remaining - amount)
+                }
+                current[recipientIndex] = 0
             }
-            // 多出的牌（已无人需要）即视为底牌，丢弃即可
-            guard let pick = eligible.randomElement(using: &rng) else { continue }
-            hands[pick, default: []].append(card)
-            need[pick]! -= 1
+
+            build(0, cardCount)
+            result.shuffle(using: &rng)
+            return result
         }
+
+        func assignGroup(_ groupIndex: Int) -> Bool {
+            if groupIndex == suitGroups.count {
+                return others.allSatisfy { (need[$0] ?? 0) == 0 } && kittyNeed == 0
+            }
+
+            let group = suitGroups[groupIndex]
+            let eligiblePlayers = others.filter {
+                (need[$0] ?? 0) > 0 && !(voids[$0]?.contains(group.key) ?? false)
+            }
+            let distributions = possibleDistributions(
+                cardCount: group.cards.count,
+                eligiblePlayers: eligiblePlayers,
+                kittyCapacity: kittyNeed
+            )
+
+            for distribution in distributions {
+                var cursor = 0
+                for (index, player) in eligiblePlayers.enumerated() {
+                    let amount = distribution[index]
+                    if amount > 0 {
+                        hands[player, default: []].append(
+                            contentsOf: group.cards[cursor..<(cursor + amount)]
+                        )
+                        need[player, default: 0] -= amount
+                        cursor += amount
+                    }
+                }
+
+                let kittyIndex = eligiblePlayers.count
+                let kittyAmount = distribution.count > kittyIndex
+                    ? distribution[kittyIndex]
+                    : 0
+                kittyNeed -= kittyAmount
+
+                if assignGroup(groupIndex + 1) { return true }
+
+                kittyNeed += kittyAmount
+                for (index, player) in eligiblePlayers.enumerated().reversed() {
+                    let amount = distribution[index]
+                    if amount > 0 {
+                        hands[player]?.removeLast(amount)
+                        need[player, default: 0] += amount
+                    }
+                }
+            }
+            return false
+        }
+
+        _ = assignGroup(0)
 
         return hands
     }

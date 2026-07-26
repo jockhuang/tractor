@@ -18,23 +18,29 @@ struct AIContext {
         var played: [Card] = []
         var voids: [PlayerPosition: Set<String>] = [:]
 
-        for trick in state.completedTricks {
+        func record(_ trick: Trick) {
             guard let lead = trick.plays.first,
-                  let lc   = lead.cards.first else { continue }
+                  let lc = lead.cards.first else { return }
             let lk = suitKey(lc, ts: ts, tr: tr)
             for play in trick.plays {
                 played.append(contentsOf: play.cards)
-                if play.position != lead.position,
-                   let fc = play.cards.first,
-                   suitKey(fc, ts: ts, tr: tr) != lk {
+                guard play.position != lead.position else { continue }
+
+                // 多张跟牌时，出牌顺序不携带语义。只要跟出的本门牌少于
+                // 领出张数，就说明该玩家已经把本门牌全部出尽，之后确认绝门。
+                let followedSuitCount = play.cards.filter {
+                    suitKey($0, ts: ts, tr: tr) == lk
+                }.count
+                if followedSuitCount < lead.cards.count {
                     voids[play.position, default: []].insert(lk)
                 }
             }
         }
-        // 本墩已出的牌也算"已知"
-        for play in state.currentTrick.plays {
-            played.append(contentsOf: play.cards)
-        }
+
+        for trick in state.completedTricks { record(trick) }
+        // 当前墩已经暴露的绝门必须立即参与后手决策和隐藏牌抽样。
+        record(state.currentTrick)
+
         let playedIDs = Set(played.map(\.id))
         var knownByPlayer: [PlayerPosition: [Card]] = [:]
         for event in state.declarationEvents {
@@ -84,23 +90,33 @@ struct AIContext {
     }
 
     /// 该非主牌是否当前"已是最大"（双副牌中，所有更大的同花色牌均已出完 2 张）
-    func isEffectivelyBiggest(_ card: Card, ts: Suit?, tr: Rank) -> Bool {
+    func isEffectivelyBiggest(
+        _ card: Card,
+        ts: Suit?,
+        tr: Rank,
+        hand: [Card] = []
+    ) -> Bool {
         guard !CardComparator.isTrump(card, trumpSuit: ts, trumpRank: tr),
               let suit = card.suit else { return false }
 
-        // 统计已打出的同花色、更大牌的数量
-        var higherPlayed: [Int: Int] = [:]
-        for c in playedCards
+        // 自己手里的更大牌同样不可能落在对手手中。按 UUID 去重，避免未来
+        // 上下文扩展时同一张牌同时出现在多种合法已知来源中。
+        var seen = Set<UUID>()
+        let unavailableCards = (playedCards + hand).filter {
+            seen.insert($0.id).inserted
+        }
+        var higherUnavailable: [Int: Int] = [:]
+        for c in unavailableCards
             where c.suit == suit
                && !CardComparator.isTrump(c, trumpSuit: ts, trumpRank: tr)
                && c.rank.rawValue > card.rank.rawValue {
-            higherPlayed[c.rank.rawValue, default: 0] += 1
+            higherUnavailable[c.rank.rawValue, default: 0] += 1
         }
-        // 每个更大的 rank 需要 2 张都打完（双副牌）
+        // 每个更大的 rank 的两张牌都不可在对手手中时，当前牌才是确定最大。
         let higherRanks = Rank.allCases.filter {
             !$0.isJoker && $0 != tr && $0.rawValue > card.rank.rawValue
         }
-        return higherRanks.allSatisfy { (higherPlayed[$0.rawValue] ?? 0) >= 2 }
+        return higherRanks.allSatisfy { (higherUnavailable[$0.rawValue] ?? 0) >= 2 }
     }
 
     /// 大主牌（大小王 + 级牌）是否仍有残留
@@ -262,6 +278,27 @@ struct AIPlayer {
         let score: Double
     }
 
+    struct CardCombination {
+        let cards: [Card]
+        let pattern: PlayPattern
+    }
+
+    struct EndgameControlAsset {
+        let combination: CardCombination
+        let winProbability: Double
+        let trickCountCovered: Int
+        let bottomPointCapturePotential: Int
+        let structureBreakCost: Double
+        let isTrumpBased: Bool
+        let isStructureBased: Bool
+    }
+
+    enum KittyPointKnowledge: Equatable {
+        case unknown
+        case knownZero
+        case knownPositive(Int)
+    }
+
     static let monteCarloTopMoveCount = 5
     static let monteCarloSimulationCount = 24
 
@@ -281,8 +318,7 @@ struct AIPlayer {
     static func chooseCards(
         position: PlayerPosition,
         state: GameState,
-        evaluator: TrickEvaluator,
-        forcedCards: [Card] = []
+        evaluator: TrickEvaluator
     ) -> [Card] {
         let hand = state.player(position).hand
         guard !hand.isEmpty else { return [] }
@@ -298,8 +334,7 @@ struct AIPlayer {
 
         let lc = state.currentTrick.leadCards!
         return followCards(leadCards: lc, hand: hand, position: position,
-                           state: state, evaluator: evaluator,
-                           forcedCards: forcedCards, ctx: ctx)
+                           state: state, evaluator: evaluator, ctx: ctx)
     }
 
     // MARK: - 候选动作评分

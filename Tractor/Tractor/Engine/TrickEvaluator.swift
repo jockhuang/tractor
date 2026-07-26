@@ -266,10 +266,14 @@ struct TrickEvaluator {
 
         // ② 比最高对子（仅当领出含对子时才进行此层比较）
         if !leadSlam.pairs.isEmpty {
-            let cTopPair = cInfo.pairs
+            // 连对可以覆盖孤立对子槽，因此参与者若用连对完成甩牌结构，
+            // 连对中的对子也必须参与“最高对子”比较。
+            let cPairComponents = cInfo.pairs + cInfo.tractors.flatMap { pairs(in: $0) }
+            let wPairComponents = wInfo.pairs + wInfo.tractors.flatMap { pairs(in: $0) }
+            let cTopPair = cPairComponents
                 .compactMap { pairRepresentative(of: $0) }
                 .max { CardComparator.beats($1, $0, trumpSuit: trumpSuit, trumpRank: trumpRank) }
-            let wTopPair = wInfo.pairs
+            let wTopPair = wPairComponents
                 .compactMap { pairRepresentative(of: $0) }
                 .max { CardComparator.beats($1, $0, trumpSuit: trumpSuit, trumpRank: trumpRank) }
 
@@ -454,29 +458,27 @@ struct TrickEvaluator {
         var count: Int { allCards.count }
     }
 
-    /// 某玩家对甩牌的「被逼出」信息
-    struct SlamForcing {
-        let beatingTractors: [[Card]]  // 能压各连对组件的最小连对（每组）
-        let beatingPairs:    [[Card]]  // 能压各对子组件的最小对子
-        let beatingSingles:  [Card]    // 能压各单张组件的最小单张
+    enum SlamComponentKind: Equatable {
+        case tractor
+        case pair
+        case single
 
-        var hasTractor: Bool { !beatingTractors.isEmpty }
-        var hasPair:    Bool { !beatingPairs.isEmpty }
-        var hasSingle:  Bool { !beatingSingles.isEmpty }
-        var isEmpty:    Bool { !hasTractor && !hasPair && !hasSingle }
-        var categoryCount: Int { (hasTractor ? 1 : 0) + (hasPair ? 1 : 0) + (hasSingle ? 1 : 0) }
-
-        /// 最终强制出的牌：单类直接出，多类自动取张数最多的一类
-        /// TODO：多类时正式规则应由下家指定，当前自动处理
-        var resolvedForcedCards: [Card] {
-            guard !isEmpty else { return [] }
-            let options: [[Card]] = [
-                beatingTractors.flatMap { $0 },
-                beatingPairs.flatMap { $0 },
-                beatingSingles
-            ].filter { !$0.isEmpty }
-            return options.count == 1 ? options[0] : (options.max(by: { $0.count < $1.count }) ?? [])
+        var displayName: String {
+            switch self {
+            case .tractor: return "拖拉机"
+            case .pair: return "对子"
+            case .single: return "单张"
+            }
         }
+    }
+
+    /// 甩牌失败后的确定性处理结果。
+    /// 所有失败组件仍参与罚分，但领出牌只保留一个最小失败组件：
+    /// 拖拉机优先，其次对子，最后单张。
+    struct SlamFailure {
+        let forcedLeadCards: [Card]
+        let forcedKind: SlamComponentKind
+        let penaltyPoints: Int
     }
 
     /// 判断领出的牌是否为甩牌；若是则拆解并返回 SlamInfo
@@ -536,89 +538,105 @@ struct TrickEvaluator {
         return SlamInfo(suit: suit, tractors: tractors, pairs: isolatedPairs, singles: singles)
     }
 
-    /// 计算某个对手对这手甩牌的被逼出情况（每个组件找能压赢的最小牌）
-    func slamForcing(slam: SlamInfo, opponentHand: [Card]) -> SlamForcing {
-        let suitCards = opponentHand.filter { cardSuit($0) == slam.suit }
+    /// 分析甩牌失败。所有三家手牌只用于判断组件能否被同类型牌压住，
+    /// 不会对后续玩家产生任何强制跟牌约束。
+    func slamFailure(
+        slam: SlamInfo,
+        opponentHands: [PlayerPosition: [Card]]
+    ) -> SlamFailure? {
+        let hands = Array(opponentHands.values)
 
-        // 连对组件
-        var beatingTractors: [[Card]] = []
-        for tractor in slam.tractors {
-            guard let ti = tractorInfo(of: tractor) else { continue }
-            let candidates = slamFindTractors(in: suitCards, pairCount: ti.pairCount)
-                .filter { ot in
-                    guard let oti = tractorInfo(of: ot) else { return false }
-                    return CardComparator.beats(oti.highCard, ti.highCard, trumpSuit: trumpSuit, trumpRank: trumpRank)
+        let failedTractors = slam.tractors.filter { tractor in
+            guard let info = tractorInfo(of: tractor) else { return false }
+            return hands.contains { hand in
+                let suitCards = hand.filter { cardSuit($0) == slam.suit }
+                return slamFindTractors(in: suitCards, pairCount: info.pairCount).contains { candidate in
+                    guard let candidateInfo = tractorInfo(of: candidate) else { return false }
+                    return CardComparator.beats(
+                        candidateInfo.highCard,
+                        info.highCard,
+                        trumpSuit: trumpSuit,
+                        trumpRank: trumpRank
+                    )
                 }
-                .sorted { a, b in          // 取最小的（赢就行）
-                    guard let ai = tractorInfo(of: a), let bi = tractorInfo(of: b) else { return false }
-                    return CardComparator.beats(bi.highCard, ai.highCard, trumpSuit: trumpSuit, trumpRank: trumpRank)
-                }
-            if let smallest = candidates.last { beatingTractors.append(smallest) }
+            }
         }
 
-        // 对子组件
-        var beatingPairs: [[Card]] = []
-        for pair in slam.pairs {
-            guard let pRep = pairRepresentative(of: pair) else { continue }
-            let candidates = pairs(in: suitCards)
-                .filter { op in
-                    guard let opRep = pairRepresentative(of: op) else { return false }
-                    return CardComparator.beats(opRep, pRep, trumpSuit: trumpSuit, trumpRank: trumpRank)
+        let failedPairs = slam.pairs.filter { pair in
+            guard let representative = pairRepresentative(of: pair) else { return false }
+            return hands.contains { hand in
+                let suitCards = hand.filter { cardSuit($0) == slam.suit }
+                return pairs(in: suitCards).contains { candidate in
+                    guard let candidateRepresentative = pairRepresentative(of: candidate) else { return false }
+                    return CardComparator.beats(
+                        candidateRepresentative,
+                        representative,
+                        trumpSuit: trumpSuit,
+                        trumpRank: trumpRank
+                    )
                 }
-                .sorted { a, b in
-                    guard let aRep = pairRepresentative(of: a), let bRep = pairRepresentative(of: b) else { return false }
-                    return CardComparator.beats(bRep, aRep, trumpSuit: trumpSuit, trumpRank: trumpRank)
-                }
-            if let smallest = candidates.last { beatingPairs.append(smallest) }
+            }
         }
 
-        // 单张组件
-        var beatingSingles: [Card] = []
-        for single in slam.singles {
-            let candidates = suitCards
-                .filter { CardComparator.beats($0, single, trumpSuit: trumpSuit, trumpRank: trumpRank) }
-                .sorted { a, b in CardComparator.beats(b, a, trumpSuit: trumpSuit, trumpRank: trumpRank) }
-            if let smallest = candidates.last { beatingSingles.append(smallest) }
+        let failedSingles = slam.singles.filter { single in
+            hands.contains { hand in
+                hand.contains { candidate in
+                    cardSuit(candidate) == slam.suit &&
+                        CardComparator.beats(
+                            candidate,
+                            single,
+                            trumpSuit: trumpSuit,
+                            trumpRank: trumpRank
+                        )
+                }
+            }
         }
 
-        return SlamForcing(beatingTractors: beatingTractors, beatingPairs: beatingPairs, beatingSingles: beatingSingles)
+        let penaltyCards = failedTractors.reduce(0) { $0 + $1.count }
+            + failedPairs.reduce(0) { $0 + $1.count }
+            + failedSingles.count
+        guard penaltyCards > 0 else { return nil }
+
+        if let forced = failedTractors.min(by: { isWeakerTractor($0, than: $1) }) {
+            return SlamFailure(
+                forcedLeadCards: forced,
+                forcedKind: .tractor,
+                penaltyPoints: penaltyCards * 10
+            )
+        }
+        if let forced = failedPairs.min(by: { isWeakerPair($0, than: $1) }) {
+            return SlamFailure(
+                forcedLeadCards: forced,
+                forcedKind: .pair,
+                penaltyPoints: penaltyCards * 10
+            )
+        }
+        guard let forced = failedSingles.min(by: { isWeakerCard($0, than: $1) }) else {
+            return nil
+        }
+        return SlamFailure(
+            forcedLeadCards: [forced],
+            forcedKind: .single,
+            penaltyPoints: penaltyCards * 10
+        )
     }
 
-    /// 计算甩牌的罚分：任意一家有大牌则对应组件计罚（每张 ×10 分）
-    func slamPenaltyPoints(slam: SlamInfo, opponentHands: [PlayerPosition: [Card]]) -> Int {
-        var penaltyCards = 0
+    private func isWeakerTractor(_ lhs: [Card], than rhs: [Card]) -> Bool {
+        guard let lhsInfo = tractorInfo(of: lhs),
+              let rhsInfo = tractorInfo(of: rhs) else { return false }
+        if isWeakerCard(lhsInfo.highCard, than: rhsInfo.highCard) { return true }
+        if isWeakerCard(rhsInfo.highCard, than: lhsInfo.highCard) { return false }
+        return lhsInfo.pairCount < rhsInfo.pairCount
+    }
 
-        for tractor in slam.tractors {
-            guard let ti = tractorInfo(of: tractor) else { continue }
-            let anyBeats = opponentHands.values.contains { hand in
-                slamFindTractors(in: hand.filter { cardSuit($0) == slam.suit }, pairCount: ti.pairCount).contains { ot in
-                    guard let oti = tractorInfo(of: ot) else { return false }
-                    return CardComparator.beats(oti.highCard, ti.highCard, trumpSuit: trumpSuit, trumpRank: trumpRank)
-                }
-            }
-            if anyBeats { penaltyCards += tractor.count }
-        }
+    private func isWeakerPair(_ lhs: [Card], than rhs: [Card]) -> Bool {
+        guard let lhsCard = pairRepresentative(of: lhs),
+              let rhsCard = pairRepresentative(of: rhs) else { return false }
+        return isWeakerCard(lhsCard, than: rhsCard)
+    }
 
-        for pair in slam.pairs {
-            guard let pRep = pairRepresentative(of: pair) else { continue }
-            let anyBeats = opponentHands.values.contains { hand in
-                pairs(in: hand.filter { cardSuit($0) == slam.suit }).contains { op in
-                    guard let opRep = pairRepresentative(of: op) else { return false }
-                    return CardComparator.beats(opRep, pRep, trumpSuit: trumpSuit, trumpRank: trumpRank)
-                }
-            }
-            if anyBeats { penaltyCards += 2 }
-        }
-
-        for single in slam.singles {
-            let anyBeats = opponentHands.values.contains { hand in
-                hand.filter { cardSuit($0) == slam.suit }
-                    .contains { CardComparator.beats($0, single, trumpSuit: trumpSuit, trumpRank: trumpRank) }
-            }
-            if anyBeats { penaltyCards += 1 }
-        }
-
-        return penaltyCards * 10
+    private func isWeakerCard(_ lhs: Card, than rhs: Card) -> Bool {
+        CardComparator.beats(rhs, lhs, trumpSuit: trumpSuit, trumpRank: trumpRank)
     }
 
     /// 在给定的牌组中寻找指定对数的连对

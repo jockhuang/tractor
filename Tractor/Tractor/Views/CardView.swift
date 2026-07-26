@@ -1,7 +1,6 @@
 import SwiftUI
-import UIKit
 
-struct CardView: View {
+struct CardView: View, Equatable {
     let card: Card
     var isSelected: Bool = false
     var isFaceDown: Bool = false
@@ -31,19 +30,17 @@ struct CardView: View {
                 .shadow(color: cardShadowColor, radius: isSmall ? 2 : 4, x: 0, y: cardShadowYOffset)
                 .shadow(color: cardGlowColor, radius: isSmall ? 1 : 3, x: 0, y: 0)
 
-            // J/Q/K 与大小王：若已放入对应图片资源则用图片牌面，否则回退到矢量画法。
-            if useFaceImage, let name = faceImageName {
-                // 用"隐藏的矢量牌内容"占位，确定与其它牌完全相同的牌面尺寸；
-                // 图片用 .fit 完整显示（不裁剪 J/角标），白底填满 letterbox（扑克牌本就是白色），
-                // 这样既和其它牌一样大，又不会被上下裁切。
-                (card.isJoker ? AnyView(jokerContent) : AnyView(regularCardContent))
+            // 大小王使用图片资源；其它牌继续走轻量矢量牌面。
+            if let name = jokerImageName {
+                // 保留矢量 Joker 的布局尺寸，再用图片覆盖，确保手牌重叠布局中高度一致。
+                jokerContent
                     .hidden()
                     .overlay {
                         ZStack {
                             Color.white
                             Image(name)
                                 .resizable()
-                                .aspectRatio(contentMode: .fit)
+                                .scaledToFit()
                                 .padding(faceImageInset)
                         }
                     }
@@ -69,32 +66,13 @@ struct CardView: View {
         .animation(.spring(response: 0.2, dampingFraction: 0.7), value: isSelected)
     }
 
-    /// 替换 J/Q/K 与大小王牌面（数字牌仍用矢量画法）。
-    /// 资源命名：card_J_hearts / card_Q_spades / card_K_clubs …，大小王为 card_joker_big / card_joker_small。
-    private var faceImageName: String? {
+    private var jokerImageName: String? {
         switch card.rank {
         case .bigJoker:   return "card_joker_big"
         case .smallJoker: return "card_joker_small"
-        case .jack, .queen, .king:
-            guard let suit = card.suit else { return nil }
-            let rankKey = card.rank == .jack ? "J" : (card.rank == .queen ? "Q" : "K")
-            let suitKey: String
-            switch suit {
-            case .spades:   suitKey = "spades"
-            case .hearts:   suitKey = "hearts"
-            case .diamonds: suitKey = "diamonds"
-            case .clubs:    suitKey = "clubs"
-            }
-            return "card_\(rankKey)_\(suitKey)"
         default:
             return nil
         }
-    }
-
-    /// 对应图片资源存在时启用图片牌面（大牌 / 小牌均适用）；否则回退矢量画法。
-    private var useFaceImage: Bool {
-        guard let name = faceImageName else { return false }
-        return UIImage(named: name) != nil
     }
 
     private var cardBack: some View {
