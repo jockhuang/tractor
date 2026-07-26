@@ -57,6 +57,7 @@ struct GameSnapshot: Codable {
     let dealerTeamIdx: Int
     let message: String
     let lastRoundResult: RoundResult?
+    let lastDrawnCardId: UUID?
     let players: [NetworkPlayerSnapshot]
 }
 

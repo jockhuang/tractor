@@ -277,6 +277,12 @@ struct AIPlayer {
         let isStructureBased: Bool
     }
 
+    enum KittyPointKnowledge: Equatable {
+        case unknown
+        case knownZero
+        case knownPositive(Int)
+    }
+
     static let monteCarloTopMoveCount = 5
     static let monteCarloSimulationCount = 24
 
@@ -296,8 +302,7 @@ struct AIPlayer {
     static func chooseCards(
         position: PlayerPosition,
         state: GameState,
-        evaluator: TrickEvaluator,
-        forcedCards: [Card] = []
+        evaluator: TrickEvaluator
     ) -> [Card] {
         let hand = state.player(position).hand
         guard !hand.isEmpty else { return [] }
@@ -313,8 +318,7 @@ struct AIPlayer {
 
         let lc = state.currentTrick.leadCards!
         return followCards(leadCards: lc, hand: hand, position: position,
-                           state: state, evaluator: evaluator,
-                           forcedCards: forcedCards, ctx: ctx)
+                           state: state, evaluator: evaluator, ctx: ctx)
     }
 
     // MARK: - 候选动作评分

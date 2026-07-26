@@ -13,19 +13,11 @@ extension AIPlayer {
         position: PlayerPosition,
         state: GameState,
         evaluator: TrickEvaluator,
-        forcedCards: [Card] = [],
         ctx: AIContext
     ) -> [Card] {
-        if !forcedCards.isEmpty {
-            return followCardsRuleBased(
-                leadCards: leadCards, hand: hand, position: position,
-                state: state, evaluator: evaluator, forcedCards: forcedCards, ctx: ctx
-            )
-        }
-
         let baseline = followCardsRuleBased(
             leadCards: leadCards, hand: hand, position: position,
-            state: state, evaluator: evaluator, forcedCards: forcedCards, ctx: ctx
+            state: state, evaluator: evaluator, ctx: ctx
         )
         var candidates = [AIMove(cards: baseline, kind: .followBaseline)]
         candidates += generateFollowCandidates(
@@ -111,28 +103,11 @@ extension AIPlayer {
         position: PlayerPosition,
         state: GameState,
         evaluator: TrickEvaluator,
-        forcedCards: [Card] = [],
         ctx: AIContext
     ) -> [Card] {
         let ts = state.trumpSuit
         let tr = state.trumpRank
         let count = leadCards.count
-
-        // 甩牌失败强制出牌
-        if !forcedCards.isEmpty {
-            var chosen = Array(forcedCards.prefix(count))
-            if chosen.count < count {
-                let usedIDs = Set(chosen.map { $0.id })
-                let rest = hand.filter { !usedIDs.contains($0.id) }
-                chosen += smartDiscard(
-                    from: rest, count: count - chosen.count,
-                    enemyWinning: true, ts: ts, tr: tr,
-                    myTeam: position.team, ctx: ctx,
-                    state: state, position: position, evaluator: evaluator, fullHand: hand
-                )
-            }
-            return Array(chosen.prefix(count))
-        }
 
         let leadSuit     = evaluator.dominantSuit(of: leadCards)
         let currentWinner = evaluator.winner(of: state.currentTrick)

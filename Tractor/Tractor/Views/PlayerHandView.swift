@@ -5,7 +5,6 @@ struct PlayerHandView: View {
     @Binding var selectedCards: Set<UUID>
     var isActive: Bool = false
     var canSelect: Bool = true
-    var maxVisible: Int = 25
     var lastDrawnCardId: UUID? = nil  // 发牌动画：最新一张牌浮起
     var cardScale: CGFloat = 1
 
@@ -27,18 +26,16 @@ struct PlayerHandView: View {
 
     var body: some View {
         let cards = player.hand
-//        let count  = min(cards.count, maxVisible)
-//        let total  = cardWidth + CGFloat(count - 1) * cardWidth * overlapFactor
-//        let maxW   = UIScreen.main.bounds.width - 32
 
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: -(cardWidth * (1 - overlapFactor))) {
-                ForEach(Array(cards.enumerated()), id: \.element.id) { _, card in
+                ForEach(cards) { card in
                     CardView(
                         card: card,
                         isSelected: selectedCards.contains(card.id),
                         sizeScale: cardScale
                     )
+                    .equatable()
                     .offset(y: cardOffset(for: card))
                     .onTapGesture {
                         if canSelect && isActive {

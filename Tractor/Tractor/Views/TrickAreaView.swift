@@ -28,6 +28,7 @@ struct TrickAreaView: View {
         HStack(spacing: -18 * layoutScale) {
             ForEach(cards) { card in
                 CardView(card: card, isSmall: true, sizeScale: layoutScale)
+                    .equatable()
             }
         }
         .offset(x: offset.x, y: offset.y)

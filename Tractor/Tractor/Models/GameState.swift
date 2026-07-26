@@ -145,9 +145,6 @@ class GameState: ObservableObject {
     // 选中的手牌（人类玩家）
     @Published var selectedCards: Set<UUID> = []
 
-    // 甩牌强制出牌：key = 被逼出的玩家，value = 必须包含在跟牌中的牌
-    @Published var forcedFollowCards: [PlayerPosition: [Card]] = [:]
-
     // ── 计算属性 ──────────────────────────────
     var humanPlayer: Player { players[PlayerPosition.south.rawValue] }
     func player(_ pos: PlayerPosition) -> Player { players[pos.rawValue] }
@@ -178,7 +175,6 @@ class GameState: ObservableObject {
         dealtCount        = 0
         isDealingFast     = false
         lastDrawnCardId   = nil
-        forcedFollowCards   = [:]
         postDealCountdown   = 0
         isResolvingTrick    = false
         for p in players { p.hand = []; p.isDealer = false }

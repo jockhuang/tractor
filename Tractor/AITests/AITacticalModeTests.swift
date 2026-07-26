@@ -79,6 +79,605 @@ final class CardViewLayoutTests: XCTestCase {
     }
 }
 
+final class SlamFailureTests: XCTestCase {
+
+    private let evaluator = TrickEvaluator(trumpSuit: .spades, trumpRank: .two)
+
+    private func c(_ suit: Suit?, _ rank: Rank) -> Card {
+        Card(suit: suit, rank: rank)
+    }
+
+    func testMultipleFailedSinglesForceSmallestSingle() throws {
+        let cards = [
+            c(.hearts, .five),
+            c(.hearts, .seven),
+            c(.hearts, .ace)
+        ]
+        let slam = try XCTUnwrap(evaluator.slamInfo(of: cards))
+        let failure = try XCTUnwrap(evaluator.slamFailure(
+            slam: slam,
+            opponentHands: [
+                .west: [c(.hearts, .six)],
+                .north: [c(.clubs, .three)],
+                .east: [c(.hearts, .nine)]
+            ]
+        ))
+
+        XCTAssertEqual(failure.forcedKind, .single)
+        XCTAssertEqual(failure.forcedLeadCards.map(\.shortDisplay), ["♥5"])
+        XCTAssertEqual(failure.penaltyPoints, 20)
+    }
+
+    func testFailedPairsTakePriorityAndForceSmallestPair() throws {
+        let cards = [
+            c(.hearts, .four), c(.hearts, .four),
+            c(.hearts, .seven), c(.hearts, .seven),
+            c(.hearts, .ten)
+        ]
+        let slam = try XCTUnwrap(evaluator.slamInfo(of: cards))
+        let failure = try XCTUnwrap(evaluator.slamFailure(
+            slam: slam,
+            opponentHands: [
+                .west: [c(.hearts, .five), c(.hearts, .five)],
+                .north: [c(.hearts, .eight), c(.hearts, .eight)],
+                .east: [c(.hearts, .jack)]
+            ]
+        ))
+
+        XCTAssertEqual(failure.forcedKind, .pair)
+        XCTAssertEqual(failure.forcedLeadCards.map(\.shortDisplay), ["♥4", "♥4"])
+        XCTAssertEqual(failure.penaltyPoints, 50)
+    }
+
+    func testFailedTractorsTakePriorityAndForceSmallestTractor() throws {
+        let cards = [
+            c(.hearts, .three), c(.hearts, .three),
+            c(.hearts, .four), c(.hearts, .four),
+            c(.hearts, .seven), c(.hearts, .seven),
+            c(.hearts, .eight), c(.hearts, .eight),
+            c(.hearts, .queen), c(.hearts, .queen),
+            c(.hearts, .ace)
+        ]
+        let slam = try XCTUnwrap(evaluator.slamInfo(of: cards))
+        let failure = try XCTUnwrap(evaluator.slamFailure(
+            slam: slam,
+            opponentHands: [
+                .west: [
+                    c(.hearts, .five), c(.hearts, .five),
+                    c(.hearts, .six), c(.hearts, .six)
+                ],
+                .north: [
+                    c(.hearts, .nine), c(.hearts, .nine),
+                    c(.hearts, .ten), c(.hearts, .ten)
+                ],
+                .east: [c(.hearts, .king), c(.hearts, .king)]
+            ]
+        ))
+
+        XCTAssertEqual(failure.forcedKind, .tractor)
+        XCTAssertEqual(failure.forcedLeadCards.map(\.rank), [.three, .three, .four, .four])
+        XCTAssertEqual(failure.penaltyPoints, 100)
+    }
+
+    @MainActor
+    func testGameEngineReturnsOtherCardsAndAIHasNoForcedProofCard() {
+        let engine = GameEngine()
+        let state = engine.state
+        state.phase = .playing
+        state.trumpSuit = .spades
+        state.trumpRank = .two
+        state.dealerTeamIdx = 0
+        state.currentLeader = .south
+        state.currentTurn = .south
+        state.currentTrick = Trick(leadPosition: .south)
+
+        let sixes = [c(.hearts, .six), c(.hearts, .six)]
+        let ace = c(.hearts, .ace)
+        let attemptedSlam = sixes + [ace]
+        state.player(.south).hand = attemptedSlam + [c(.clubs, .three)]
+
+        let fours = [c(.hearts, .four), c(.hearts, .four)]
+        state.player(.west).hand = fours
+        let threes = [c(.hearts, .three), c(.hearts, .three)]
+        let queens = [c(.hearts, .queen), c(.hearts, .queen)]
+        state.player(.north).hand = threes + queens
+        state.player(.east).hand = [c(.diamonds, .four), c(.diamonds, .four)]
+
+        engine.humanPlay(
+            position: .south,
+            selectedIDs: Set(attemptedSlam.map(\.id))
+        )
+
+        XCTAssertEqual(state.currentTrick.plays.first?.cards.map(\.shortDisplay), ["♥6", "♥6"])
+        XCTAssertEqual(state.currentTurn, .west)
+        XCTAssertEqual(state.attackScore, 20)
+        XCTAssertTrue(state.player(.south).hand.contains { $0.id == ace.id })
+        XCTAssertTrue(sixes.allSatisfy { six in
+            !state.player(.south).hand.contains { $0.id == six.id }
+        })
+
+        engine.humanPlay(position: .west, selectedIDs: Set(fours.map(\.id)))
+
+        // 北家的 ♥Q 对是证明原甩牌失败的牌，但失败后不再强制跟出证明牌。
+        // 队友南仍以 ♥6 对领先，AI 应按普通对子策略跟最小的 ♥3 对。
+        let chosen = AIPlayer.chooseCards(
+            position: .north,
+            state: state,
+            evaluator: evaluator
+        )
+        XCTAssertEqual(chosen.map(\.shortDisplay), ["♥3", "♥3"])
+        engine.humanPlay(position: .north, selectedIDs: Set(chosen.map(\.id)))
+
+        XCTAssertEqual(state.currentTrick.plays.last?.cards.map(\.shortDisplay), ["♥3", "♥3"])
+        XCTAssertTrue(queens.allSatisfy { queen in
+            state.player(.north).hand.contains { $0.id == queen.id }
+        })
+    }
+}
+
+/// 真实经过 `AIPlayer.chooseCards` 的组合牌战术测试。
+/// 覆盖强制跟型、将吃和盖吃，不以单张代表牌近似组合牌行为。
+final class AICombinationTacticsTests: XCTestCase {
+
+    private let ts: Suit? = .spades
+    private let tr: Rank = .two
+    private var evaluator: TrickEvaluator {
+        TrickEvaluator(trumpSuit: ts, trumpRank: tr)
+    }
+
+    private func c(_ suit: Suit?, _ rank: Rank) -> Card {
+        Card(suit: suit, rank: rank)
+    }
+
+    private func makeState(
+        lead: PlayerPosition,
+        plays: [(PlayerPosition, [Card])],
+        turn: PlayerPosition,
+        hand: [Card]
+    ) -> GameState {
+        let state = GameState()
+        state.phase = .playing
+        state.trumpSuit = ts
+        state.trumpRank = tr
+        state.dealerTeamIdx = 0
+        var trick = Trick(leadPosition: lead)
+        for play in plays {
+            trick.plays.append((position: play.0, cards: play.1))
+        }
+        state.currentTrick = trick
+        state.currentLeader = lead
+        state.currentTurn = turn
+        state.player(turn).hand = hand
+        return state
+    }
+
+    private func choose(
+        position: PlayerPosition,
+        state: GameState
+    ) -> [Card] {
+        AIPlayer.chooseCards(
+            position: position,
+            state: state,
+            evaluator: evaluator
+        )
+    }
+
+    private func ranks(_ cards: [Card]) -> [Rank] {
+        cards.map(\.rank).sorted { $0.rawValue < $1.rawValue }
+    }
+
+    private func winner(
+        state: GameState,
+        position: PlayerPosition,
+        cards: [Card]
+    ) -> PlayerPosition {
+        var trick = state.currentTrick
+        trick.plays.append((position: position, cards: cards))
+        return evaluator.winner(of: trick)
+    }
+
+    func testAILeadsSafeSlamAsWholeCombination() throws {
+        let hand = [
+            c(.hearts, .king), c(.hearts, .king), c(.hearts, .ace),
+            c(.clubs, .three)
+        ]
+        let state = makeState(lead: .north, plays: [], turn: .north, hand: hand)
+
+        let chosen = choose(position: .north, state: state)
+        let slam = try XCTUnwrap(evaluator.slamInfo(of: chosen))
+
+        XCTAssertEqual(ranks(chosen), [.king, .king, .ace])
+        XCTAssertEqual(slam.pairs.count, 1)
+        XCTAssertEqual(slam.singles.count, 1)
+    }
+
+    func testAIFollowsPairStructureAndUsesWinningPairForPointTrick() {
+        let leadPair = [c(.hearts, .king), c(.hearts, .king)]
+        let hand = [
+            c(.hearts, .three), c(.hearts, .three),
+            c(.hearts, .ace), c(.hearts, .ace),
+            c(.clubs, .four)
+        ]
+        let state = makeState(
+            lead: .south,
+            plays: [(.south, leadPair)],
+            turn: .west,
+            hand: hand
+        )
+
+        let chosen = choose(position: .west, state: state)
+
+        XCTAssertTrue(evaluator.isValidPlay(selected: chosen, hand: hand, leadCards: leadPair))
+        XCTAssertEqual(ranks(chosen), [.ace, .ace])
+        XCTAssertNotNil(AIPlayer.pairRepresentative(of: chosen, trumpSuit: ts, trumpRank: tr))
+        XCTAssertEqual(winner(state: state, position: .west, cards: chosen), .west)
+    }
+
+    func testAIFollowsTractorStructureAndUsesWinningTractorForPointTrick() {
+        let leadTractor = [
+            c(.hearts, .nine), c(.hearts, .nine),
+            c(.hearts, .ten), c(.hearts, .ten)
+        ]
+        let hand = [
+            c(.hearts, .three), c(.hearts, .three),
+            c(.hearts, .four), c(.hearts, .four),
+            c(.hearts, .jack), c(.hearts, .jack),
+            c(.hearts, .queen), c(.hearts, .queen),
+            c(.clubs, .four)
+        ]
+        let state = makeState(
+            lead: .south,
+            plays: [(.south, leadTractor)],
+            turn: .west,
+            hand: hand
+        )
+
+        let chosen = choose(position: .west, state: state)
+
+        XCTAssertTrue(evaluator.isValidPlay(selected: chosen, hand: hand, leadCards: leadTractor))
+        XCTAssertEqual(ranks(chosen), [.jack, .jack, .queen, .queen])
+        XCTAssertEqual(AIPlayer.tractorInfo(of: chosen, trumpSuit: ts, trumpRank: tr)?.pairCount, 2)
+        XCTAssertEqual(winner(state: state, position: .west, cards: chosen), .west)
+    }
+
+    func testAIPairRuffUsesWeakestWinningTrumpPair() {
+        let leadPair = [c(.hearts, .king), c(.hearts, .king)]
+        let hand = [
+            c(.spades, .three), c(.spades, .three),
+            c(.spades, .ace), c(.spades, .ace),
+            c(.clubs, .four)
+        ]
+        let state = makeState(
+            lead: .south,
+            plays: [(.south, leadPair)],
+            turn: .west,
+            hand: hand
+        )
+
+        let chosen = choose(position: .west, state: state)
+
+        XCTAssertEqual(ranks(chosen), [.three, .three])
+        XCTAssertTrue(chosen.allSatisfy { evaluator.cardSuit($0) == nil })
+        XCTAssertNotNil(AIPlayer.pairRepresentative(of: chosen, trumpSuit: ts, trumpRank: tr))
+        XCTAssertEqual(winner(state: state, position: .west, cards: chosen), .west)
+    }
+
+    func testAIPairOverruffUsesWeakestHigherTrumpPair() {
+        let leadPair = [c(.hearts, .king), c(.hearts, .king)]
+        let firstRuff = [c(.spades, .three), c(.spades, .three)]
+        let hand = [
+            c(.spades, .four), c(.spades, .four),
+            c(.spades, .ace), c(.spades, .ace),
+            c(.clubs, .six)
+        ]
+        let state = makeState(
+            lead: .south,
+            plays: [(.south, leadPair), (.west, firstRuff)],
+            turn: .north,
+            hand: hand
+        )
+
+        let chosen = choose(position: .north, state: state)
+
+        XCTAssertEqual(ranks(chosen), [.four, .four])
+        XCTAssertTrue(chosen.allSatisfy { evaluator.cardSuit($0) == nil })
+        XCTAssertNotNil(AIPlayer.pairRepresentative(of: chosen, trumpSuit: ts, trumpRank: tr))
+        XCTAssertEqual(winner(state: state, position: .north, cards: chosen), .north)
+    }
+
+    func testAITractorRuffUsesWeakestWinningTrumpTractor() {
+        let leadTractor = [
+            c(.hearts, .nine), c(.hearts, .nine),
+            c(.hearts, .ten), c(.hearts, .ten)
+        ]
+        let hand = [
+            c(.spades, .three), c(.spades, .three),
+            c(.spades, .four), c(.spades, .four),
+            c(.spades, .jack), c(.spades, .jack),
+            c(.spades, .queen), c(.spades, .queen),
+            c(.clubs, .six)
+        ]
+        let state = makeState(
+            lead: .south,
+            plays: [(.south, leadTractor)],
+            turn: .west,
+            hand: hand
+        )
+
+        let chosen = choose(position: .west, state: state)
+
+        XCTAssertEqual(ranks(chosen), [.three, .three, .four, .four])
+        XCTAssertTrue(chosen.allSatisfy { evaluator.cardSuit($0) == nil })
+        XCTAssertEqual(AIPlayer.tractorInfo(of: chosen, trumpSuit: ts, trumpRank: tr)?.pairCount, 2)
+        XCTAssertEqual(winner(state: state, position: .west, cards: chosen), .west)
+    }
+
+    func testAITractorOverruffUsesHigherTrumpTractorStructure() {
+        let leadTractor = [
+            c(.hearts, .nine), c(.hearts, .nine),
+            c(.hearts, .ten), c(.hearts, .ten)
+        ]
+        let firstRuff = [
+            c(.spades, .three), c(.spades, .three),
+            c(.spades, .four), c(.spades, .four)
+        ]
+        let hand = [
+            c(.spades, .five), c(.spades, .five),
+            c(.spades, .six), c(.spades, .six),
+            c(.spades, .jack), c(.spades, .jack),
+            c(.spades, .queen), c(.spades, .queen),
+            c(.clubs, .six)
+        ]
+        let state = makeState(
+            lead: .south,
+            plays: [(.south, leadTractor), (.west, firstRuff)],
+            turn: .north,
+            hand: hand
+        )
+
+        let chosen = choose(position: .north, state: state)
+
+        XCTAssertTrue(chosen.allSatisfy { evaluator.cardSuit($0) == nil })
+        XCTAssertEqual(AIPlayer.tractorInfo(of: chosen, trumpSuit: ts, trumpRank: tr)?.pairCount, 2)
+        let firstHigh = try? XCTUnwrap(
+            AIPlayer.tractorInfo(of: firstRuff, trumpSuit: ts, trumpRank: tr)?.highCard
+        )
+        let chosenHigh = try? XCTUnwrap(
+            AIPlayer.tractorInfo(of: chosen, trumpSuit: ts, trumpRank: tr)?.highCard
+        )
+        XCTAssertTrue(
+            firstHigh != nil && chosenHigh != nil &&
+                CardComparator.beats(chosenHigh!, firstHigh!, trumpSuit: ts, trumpRank: tr),
+            "盖吃必须使用更高的完整主拖拉机，chosen=\(chosen.map(\.shortDisplay))"
+        )
+        XCTAssertEqual(winner(state: state, position: .north, cards: chosen), .north)
+    }
+
+    func testAIStructuredSlamRuffMatchesPairAndSingle() throws {
+        let leadSlam = [
+            c(.hearts, .seven), c(.hearts, .seven), c(.hearts, .king)
+        ]
+        let hand = [
+            c(.spades, .three), c(.spades, .three), c(.spades, .four),
+            c(.spades, .jack), c(.spades, .jack), c(.spades, .queen),
+            c(.clubs, .six)
+        ]
+        let state = makeState(
+            lead: .south,
+            plays: [(.south, leadSlam)],
+            turn: .west,
+            hand: hand
+        )
+
+        let chosen = choose(position: .west, state: state)
+        let structure = try XCTUnwrap(evaluator.slamInfo(of: chosen))
+
+        XCTAssertEqual(ranks(chosen), [.three, .three, .four])
+        XCTAssertTrue(chosen.allSatisfy { evaluator.cardSuit($0) == nil })
+        XCTAssertEqual(structure.pairs.count, 1)
+        XCTAssertEqual(structure.singles.count, 1)
+        XCTAssertEqual(winner(state: state, position: .west, cards: chosen), .west)
+    }
+
+    func testAIStructuredSlamOverruffMatchesAndRaisesPair() throws {
+        let leadSlam = [
+            c(.hearts, .seven), c(.hearts, .seven), c(.hearts, .king)
+        ]
+        let firstRuff = [
+            c(.spades, .three), c(.spades, .three), c(.spades, .four)
+        ]
+        let hand = [
+            c(.spades, .five), c(.spades, .five), c(.spades, .six),
+            c(.spades, .jack), c(.spades, .jack), c(.spades, .queen),
+            c(.clubs, .six)
+        ]
+        let state = makeState(
+            lead: .south,
+            plays: [(.south, leadSlam), (.west, firstRuff)],
+            turn: .north,
+            hand: hand
+        )
+
+        let chosen = choose(position: .north, state: state)
+        let structure = try XCTUnwrap(evaluator.slamInfo(of: chosen))
+
+        XCTAssertEqual(ranks(chosen), [.five, .five, .six])
+        XCTAssertTrue(chosen.allSatisfy { evaluator.cardSuit($0) == nil })
+        XCTAssertEqual(structure.pairs.count, 1)
+        XCTAssertEqual(structure.singles.count, 1)
+        XCTAssertEqual(winner(state: state, position: .north, cards: chosen), .north)
+    }
+
+    func testAIDiscardsOnlySideCardsWhenOpponentSlamsAndRuffStructureIsUnavailable() {
+        let leadSlam = [
+            c(.hearts, .seven), c(.hearts, .seven), c(.hearts, .king)
+        ]
+        let jokerPair = [c(nil, .bigJoker), c(nil, .bigJoker)]
+        let sideDiscards = [
+            c(.clubs, .three), c(.diamonds, .four), c(.clubs, .six)
+        ]
+        let hand = jokerPair + sideDiscards
+        let state = makeState(
+            lead: .south,
+            plays: [(.south, leadSlam)],
+            turn: .west,
+            hand: hand
+        )
+
+        let chosen = choose(position: .west, state: state)
+
+        XCTAssertTrue(evaluator.isValidPlay(selected: chosen, hand: hand, leadCards: leadSlam))
+        XCTAssertEqual(Set(chosen.map(\.id)), Set(sideDiscards.map(\.id)))
+        XCTAssertFalse(
+            chosen.contains {
+                CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
+            },
+            "无法匹配甩牌结构时，有足够副牌可垫就不应拆对大王，chosen=\(chosen.map(\.shortDisplay))"
+        )
+    }
+}
+
+final class AIKittyEndgameTests: XCTestCase {
+
+    private let ts: Suit? = .spades
+    private let tr: Rank = .two
+    private var evaluator: TrickEvaluator {
+        TrickEvaluator(trumpSuit: ts, trumpRank: tr)
+    }
+
+    private func c(_ suit: Suit?, _ rank: Rank) -> Card {
+        Card(suit: suit, rank: rank)
+    }
+
+    private func trumpExhaustionEvidence() -> Trick {
+        var trick = Trick(leadPosition: .east)
+        trick.plays.append((position: .east, cards: [c(.spades, .seven)]))
+        trick.plays.append((position: .south, cards: [c(.hearts, .four)]))
+        trick.plays.append((position: .west, cards: [c(.spades, .eight)]))
+        trick.plays.append((position: .north, cards: [c(.clubs, .six)]))
+        return trick
+    }
+
+    private func makeEndgameState(
+        dealer: PlayerPosition,
+        kitty: [Card]
+    ) -> (state: GameState, hand: [Card], context: AIContext) {
+        let state = GameState()
+        state.phase = .playing
+        state.trumpSuit = ts
+        state.trumpRank = tr
+        state.dealerPosition = dealer
+        state.dealerTeamIdx = dealer.team
+        state.completedTricks = [trumpExhaustionEvidence()]
+        state.currentTrick = Trick(leadPosition: .west)
+        state.currentLeader = .west
+        state.currentTurn = .west
+        state.kitty = kitty
+
+        let hand = [
+            c(.spades, .three), c(.spades, .four), c(.spades, .ace),
+            c(.hearts, .three), c(.clubs, .four), c(.diamonds, .six)
+        ]
+        state.player(.west).hand = hand
+        let context = AIContext.build(state: state, ts: ts, tr: tr)
+        return (state, hand, context)
+    }
+
+    func testKnownPointKittyAndTrumpVoidEnemiesLeadSideCardToKeepLastControl() {
+        let setup = makeEndgameState(
+            dealer: .west,
+            kitty: [
+                c(.hearts, .five), c(.clubs, .ten),
+                c(.hearts, .three), c(.hearts, .four),
+                c(.clubs, .six), c(.clubs, .seven),
+                c(.diamonds, .eight), c(.diamonds, .nine)
+            ]
+        )
+
+        XCTAssertTrue(
+            setup.context.allEnemiesVoid(myTeam: PlayerPosition.west.team, key: "TRUMP")
+        )
+        XCTAssertEqual(
+            AIPlayer.kittyPointKnowledge(
+                position: .west,
+                hand: setup.hand,
+                state: setup.state,
+                ctx: setup.context
+            ),
+            .knownPositive(15)
+        )
+
+        let chosen = AIPlayer.chooseCards(
+            position: .west,
+            state: setup.state,
+            evaluator: evaluator
+        )
+
+        XCTAssertEqual(chosen.count, 1)
+        XCTAssertFalse(
+            chosen.contains {
+                CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
+            },
+            "已知底牌有15分且两个对手无主时，应先清副牌并保留末轮主牌，chosen=\(chosen.map(\.shortDisplay))"
+        )
+    }
+
+    func testKnownZeroPointKittyDoesNotActivateBottomPreservationOverride() {
+        let setup = makeEndgameState(
+            dealer: .west,
+            kitty: [
+                c(.hearts, .three), c(.hearts, .four),
+                c(.clubs, .six), c(.clubs, .seven),
+                c(.diamonds, .eight), c(.diamonds, .nine),
+                c(.hearts, .jack), c(.clubs, .queen)
+            ]
+        )
+
+        XCTAssertEqual(
+            AIPlayer.kittyPointKnowledge(
+                position: .west,
+                hand: setup.hand,
+                state: setup.state,
+                ctx: setup.context
+            ),
+            .knownZero
+        )
+        XCTAssertNil(
+            AIPlayer.knownPointKittyEndgameLead(
+                position: .west,
+                hand: setup.hand,
+                state: setup.state,
+                evaluator: evaluator,
+                ctx: setup.context
+            ),
+            "已知底牌0分时不应启用专门的保底牌覆盖策略"
+        )
+    }
+
+    func testNonDealerDoesNotReadActualKittyPointsWithoutInference() {
+        let setup = makeEndgameState(
+            dealer: .south,
+            kitty: [
+                c(.hearts, .five), c(.clubs, .ten),
+                c(.hearts, .three), c(.hearts, .four),
+                c(.clubs, .six), c(.clubs, .seven),
+                c(.diamonds, .eight), c(.diamonds, .nine)
+            ]
+        )
+
+        XCTAssertEqual(
+            AIPlayer.kittyPointKnowledge(
+                position: .west,
+                hand: setup.hand,
+                state: setup.state,
+                ctx: setup.context
+            ),
+            .unknown,
+            "非庄家不能直接读取真实底牌中的15分"
+        )
+    }
+}
+
 /// 战术模式 / 阻分（Point Denial）的 XCTest 用例。
 /// 复用与 AITests/main.swift（独立 swiftc 跑测）相同的场景，验证 Monte Carlo 在
 /// 阻分场景下按 TacticalMode 切换目标函数，不再被保主偏置带偏。
@@ -521,19 +1120,12 @@ final class AITacticalModeTests: XCTestCase {
         s.currentTurn = .east
         s.completedTricks = [
             {
-                var t = Trick(leadPosition: .south)
-                t.plays.append((position: .south, cards: [c(.spades, .three)]))
-                t.plays.append((position: .west, cards: [c(.hearts, .six)]))
-                t.plays.append((position: .north, cards: [c(.spades, .four)]))
-                t.plays.append((position: .east, cards: [c(.clubs, .six)]))
-                return t
-            }(),
-            {
-                var t = Trick(leadPosition: .north)
-                t.plays.append((position: .north, cards: [c(.spades, .five)]))
-                t.plays.append((position: .east, cards: [c(.diamonds, .seven)]))
-                t.plays.append((position: .south, cards: [c(.spades, .six)]))
-                t.plays.append((position: .west, cards: [c(.clubs, .seven)]))
+                // 东的两名对手（南、北）都在同一墩明确暴露无主。
+                var t = Trick(leadPosition: .west)
+                t.plays.append((position: .west, cards: [c(.spades, .three)]))
+                t.plays.append((position: .north, cards: [c(.hearts, .six)]))
+                t.plays.append((position: .east, cards: [c(.spades, .four)]))
+                t.plays.append((position: .south, cards: [c(.diamonds, .six)]))
                 return t
             }()
         ]

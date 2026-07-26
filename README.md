@@ -114,14 +114,14 @@ The other three players are checked to see whether they hold a larger card/group
 - If the slam contains pairs, no opponent may hold a larger pair.
 - If the slam contains tractors, no opponent may hold a larger tractor.
 
-### Failed Slam Penalty — `GameEngine.analyzeSlamLead`
+### Failed Slam Resolution — `TrickEvaluator.slamFailure` / `GameEngine.resolveSlamLead`
 
 If the slam fails:
 
 - Each failed card causes a 10-point penalty deducted from the slam leader's team.
-- The opponent who holds the beating card/group is marked as having forced follow cards in `state.forcedFollowCards`. When following, that player must include the forced cards.
-- If an opponent has both a larger single and a larger pair, the current implementation automatically chooses the forced group with the larger card count. (Official rules should allow the next player to specify — currently TODO.)
-- Forced follow cards are cleared at the end of each trick.
+- The slam leader automatically leads one smallest failed component; all other attempted cards return to the leader's hand.
+- Failed-component priority is tractor, then pair, then single. Within a category, the weakest failed component is selected.
+- The other three players follow using the normal rules; no forced-follow state is created.
 
 ---
 
@@ -252,6 +252,8 @@ This structure removes old special cases by construction:
 - **Controlled trump transfer** lives in Tier 4 and only participates when no cashing/control/strong-structure asset exists.
 
 Large trump pairs — joker pairs, level-rank pairs, and trump-Ace pairs — are protected by `bigTrumpPairLeadAllowed`: they are not led early just because the AI has many trumps or the pair carries points. They are actively led only in the endgame (hand count ≤ 6), or if no other legal fallback exists.
+
+Endgame kitty control is handled by `knownPointKittyEndgameLead`. With at most 8 cards left, both enemies confirmed void in trump, at least one trump and one side card remaining, and a kitty known to contain points, the AI stops pulling trump and leads side cards first so it can retain a stable trump control for the final trick. The dealer knows the exact kitty it buried; non-dealers cannot read the real `state.kitty` and may only classify it from played/revealed cards and proven voids. A kitty known to contain zero points does not activate this override.
 
 ### Lead Legality Filter — `filterAllowedLeadAssets` / `allowTrumpLead`
 
@@ -500,8 +502,8 @@ Attacking side scores < 80 → defending side wins:
 | Modify play validation rules | `TrickEvaluator.isValidPlay` |
 | Modify slam validation / decomposition logic | `TrickEvaluator.slamInfo` / `decomposeSlam` |
 | Modify slam winner comparison logic | `TrickEvaluator.slamTrumpBeats` |
-| Modify slam penalty calculation | `TrickEvaluator.slamPenaltyPoints` |
-| Modify slam forced-follow logic | `GameEngine.analyzeSlamLead` |
+| Modify failed-slam component selection or penalty | `TrickEvaluator.slamFailure` |
+| Modify the actual lead after a failed slam | `GameEngine.resolveSlamLead` |
 | Modify trick winner evaluation | `TrickEvaluator.beatsPlay` / `winner` |
 | Modify AI lead strategy | `AIPlayer.leadCards` / `buildLeadAssets` / `selectLeadAssetPool` |
 | Tune AI lead scoring weights / priority | `AIPlayer.leadAssetScore` / `LeadAssetTier` |

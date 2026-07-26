@@ -79,11 +79,11 @@ Views/
   - 甩牌含对子 → 三家不能有大于该对子的对子
   - 甩牌含连对 → 三家不能有大于该连对的连对
 
-**甩牌失败后果**（`GameEngine.analyzeSlamLead`）：
+**甩牌失败后果**（`TrickEvaluator.slamFailure` / `GameEngine.resolveSlamLead`）：
 - 每张失败的牌罚 10 分（从甩牌方所在队扣除）
-- 有大牌的对手被标记为「强制出牌」（`state.forcedFollowCards`），跟牌时必须包含其中的强制牌
-- 若对手同时有大于单张和大于对子的牌，自动取张数最多的一类强制出（正式规则应由下家指定，TODO）
-- 强制跟牌在每墩结束时清除
+- 甩牌方自动改为领出一个「最小失败组件」，其余甩牌退回手牌
+- 组件优先级：失败拖拉机 > 失败对子 > 失败单张；同类有多个失败组件时取其中最小的
+- 后续三家只按普通跟牌规则出牌，不设置任何强制跟牌约束
 
 ### 赢家判断（winner / beatsPlay）
 压牌严格按以下优先级判断：
@@ -142,7 +142,7 @@ AI 已不再走单一固定优先级表。无论先手还是跟牌，都走同�
 2. **启发式打分**：先手用 `leadAssetScore` 在当前资产层内部排序；跟牌用 `scoreFollow` 给候选打分。
 3. **蒙特卡洛模拟**：取分数最高的前 `monteCarloTopMoveCount`（=5）个候选，各模拟 `monteCarloSimulationCount`（=24）次对未知手牌的随机抽样对局，选综合分（模拟均分 + 启发式分 × 0.03）最高者出牌。
 
-`chooseCards`：当前墩无人出牌则先手，否则跟牌；甩牌失败的强制跟牌牌（`forcedCards`）跳过整套流程直接走规则路径。
+`chooseCards`：当前墩无人出牌则先手，否则跟牌。
 
 ### AI 记忆（AIContext）
 
@@ -185,6 +185,12 @@ AI 已不再走单一固定优先级表。无论先手还是跟牌，都走同�
 - 王对、级牌对、主 A 对是全局最强控制 / 将吃资源，不能因为“主牌多”或“这对牌自身带分”就在开局/中盘主动领出。
 - `bigTrumpPairLeadAllowed` 只在残局（手牌 ≤6）主动放行这类大主对子；若全手无其他合法兜底，最终仍可出牌。
 - 拔主计划优先用低成本小主过渡或普通主牌，不用最高控制对裸拔。
+
+**残局保底牌控制（`knownPointKittyEndgameLead`）**：
+- 手牌 ≤8、两名对手都已明确绝主、AI 仍有主牌和副牌，并且 AI 能确认底牌有分时，不再继续吊主；优先领副牌，保留最后一手主牌控制来争取末墩。
+- 庄家知道自己埋下的底牌，可确认有分或 0 分；非庄家不能读取真实 `state.kitty`，只能通过已出牌、自己手牌、亮牌和绝门信息推断。无法确认时保持 `unknown`。
+- 已知底牌 0 分时不启用专门的保底覆盖策略，回到普通残局资产决策。
+- “对手无主”只统计当前 AI 的两名敌方玩家，不能把自己或队友的绝主证据误算进去。
 
 ### 先手打分——点数优先的资产评分（leadAssetScore）
 
@@ -247,8 +253,6 @@ AI 已不再走单一固定优先级表。无论先手还是跟牌，都走同�
    - `filterTrumpControlMoves`：所有花主牌的候选统一用 Trump Control Decision 分类；高分墩或高主动权需求时，若存在锁定/争墩主牌，会剔除被动主牌。
    - `filterHighInitiativeWinningMoves`：当急需主动权（`initiativeNeed` ≥ 100）时，若存在「便宜、不拆对子、不动大主」的取胜走法则只保留它们；主牌走法还必须在 Trump Control 下不是被动且得分为正。
 3. 用 `scoreFollow` 打分，取前 5 名，再由蒙特卡洛择优。
-
-甩牌失败的强制跟牌跳过整套流程。
 
 **跟牌打分（scoreFollow）：**
 
@@ -433,13 +437,14 @@ startNewGame()
 | 修改出牌合法性规则 | `TrickEvaluator.isValidPlay` |
 | 修改甩牌检测 / 拆解逻辑 | `TrickEvaluator.slamInfo` / `decomposeSlam` |
 | 修改甩牌赢家比较逻辑 | `TrickEvaluator.slamTrumpBeats` |
-| 修改甩牌罚分计算 | `TrickEvaluator.slamPenaltyPoints` |
-| 修改甩牌强制出牌逻辑 | `GameEngine.analyzeSlamLead` |
+| 修改甩牌失败组件选择 / 罚分计算 | `TrickEvaluator.slamFailure` |
+| 修改甩牌失败后的实际领出 | `GameEngine.resolveSlamLead` |
 | 修改赢墩判断 | `TrickEvaluator.beatsPlay` / `winner` |
 | 修改 AI 先手策略 | `AIPlayer.leadCards` / `buildLeadAssets` / `selectLeadAssetPool` |
 | 调整 AI 先手打分权重 / 优先级 | `AIPlayer.leadAssetScore` / `LeadAssetTier` |
 | 调整单个先手概念 | `findAbsoluteSideWinnerLeadCandidates`（兑现赢家）·`findSlamLeadCandidates`（安全控制组）·`findTractorLeadCandidates` / `findStrongPairLeadCandidates`（强结构）·`findTrumpTransferLeadCandidates` / `findLongSuitDevelopmentLeadCandidates`（主动权建设） |
 | 调整开局大主对子保护（王对 / 级牌对 / 主A对） | `AIPlayer.bigTrumpPairLeadAllowed` |
+| 调整残局已知有分底牌的末轮控制 | `AIPlayer.knownPointKittyEndgameLead` / `kittyPointKnowledge` / `endgameSideDisposalLeadAssets` |
 | 调整拆对子/结构惩罚 | `AIPlayer.structureBreakPenalty` / `strongStructureBreakPenalty`（跟牌）与 `structureFragmentationCost` / `mixedSlamFragmentationCost`（先手资产完整性） |
 | 修改 AI 蒙特卡洛模拟 | `AIPlayer.monteCarloBestMove` / `simulateCurrentTrick` / `monteCarloTopMoveCount` / `monteCarloSimulationCount` |
 | 修改 AI 甩牌领出条件 | `AIPlayer.findSlamLead` / `isEffectivelyBiggestSingle` / `isEffectivelyBiggestPair` |
