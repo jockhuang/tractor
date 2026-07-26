@@ -266,10 +266,14 @@ struct TrickEvaluator {
 
         // ② 比最高对子（仅当领出含对子时才进行此层比较）
         if !leadSlam.pairs.isEmpty {
-            let cTopPair = cInfo.pairs
+            // 连对可以覆盖孤立对子槽，因此参与者若用连对完成甩牌结构，
+            // 连对中的对子也必须参与“最高对子”比较。
+            let cPairComponents = cInfo.pairs + cInfo.tractors.flatMap { pairs(in: $0) }
+            let wPairComponents = wInfo.pairs + wInfo.tractors.flatMap { pairs(in: $0) }
+            let cTopPair = cPairComponents
                 .compactMap { pairRepresentative(of: $0) }
                 .max { CardComparator.beats($1, $0, trumpSuit: trumpSuit, trumpRank: trumpRank) }
-            let wTopPair = wInfo.pairs
+            let wTopPair = wPairComponents
                 .compactMap { pairRepresentative(of: $0) }
                 .max { CardComparator.beats($1, $0, trumpSuit: trumpSuit, trumpRank: trumpRank) }
 

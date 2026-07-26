@@ -95,7 +95,7 @@ extension AIPlayer {
         // ── 1. 当前"已是最大"的非主牌中，优先出对子 ──────────────
         // 按花色分组，找有"当前最大"牌的花色（且不是敌方已绝的花色）
         var biggestBySuit: [Suit: [Card]] = [:]
-        for card in sideCards where ctx.isEffectivelyBiggest(card, ts: ts, tr: tr) {
+        for card in sideCards where ctx.isEffectivelyBiggest(card, ts: ts, tr: tr, hand: hand) {
             guard let suit = card.suit else { continue }
             let key = AIContext.suitKey(card, ts: ts, tr: tr)
             // 敌方已全绝此花色，领出无意义（对方会将吃）
@@ -371,7 +371,7 @@ extension AIPlayer {
                 + points * 8 * pointPressure
                 + security * 90
                 + Double(cards.count) * 18
-                + sideSuitUrgency(cards, position: position, ts: ts, tr: tr, ctx: ctx)
+                + sideSuitUrgency(cards, position: position, hand: hand, ts: ts, tr: tr, ctx: ctx)
         case .safeControlGroup:
             base = 320
                 + security * 85
@@ -753,8 +753,8 @@ extension AIPlayer {
         let rBreak = structureBreakPenalty(cards: [rhs], hand: hand, ts: ts, tr: tr)
             + strongStructureBreakPenalty(cards: [rhs], hand: hand, ts: ts, tr: tr)
         if lBreak != rBreak { return lBreak < rBreak }
-        let lBig = ctx.isEffectivelyBiggest(lhs, ts: ts, tr: tr)
-        let rBig = ctx.isEffectivelyBiggest(rhs, ts: ts, tr: tr)
+        let lBig = ctx.isEffectivelyBiggest(lhs, ts: ts, tr: tr, hand: hand)
+        let rBig = ctx.isEffectivelyBiggest(rhs, ts: ts, tr: tr, hand: hand)
         if lBig != rBig { return !lBig }
         return weakerCard(lhs, than: rhs, trumpSuit: ts, trumpRank: tr)
     }
@@ -1015,7 +1015,9 @@ extension AIPlayer {
             return false
         }
 
-        if cards.contains(where: { $0.rank == .ace || ctx.isEffectivelyBiggest($0, ts: ts, tr: tr) }) {
+        if cards.contains(where: {
+            $0.rank == .ace || ctx.isEffectivelyBiggest($0, ts: ts, tr: tr, hand: hand)
+        }) {
             return true
         }
         return pairs(in: cards, trumpSuit: ts, trumpRank: tr).contains { pair in
@@ -1028,6 +1030,7 @@ extension AIPlayer {
     static func sideSuitUrgency(
         _ cards: [Card],
         position: PlayerPosition,
+        hand: [Card],
         ts: Suit?,
         tr: Rank,
         ctx: AIContext
@@ -1041,7 +1044,9 @@ extension AIPlayer {
         let voidEnemies = Double(ctx.voidEnemies(myTeam: position.team, key: suit.rawValue).count)
         var urgency = 35.0 - voidEnemies * 22.0
         if cards.contains(where: { $0.rank == .ace }) { urgency += 25 }
-        if cards.contains(where: { ctx.isEffectivelyBiggest($0, ts: ts, tr: tr) }) { urgency += 20 }
+        if cards.contains(where: {
+            ctx.isEffectivelyBiggest($0, ts: ts, tr: tr, hand: hand)
+        }) { urgency += 20 }
         urgency += Double(ctx.unplayedSuitPoints(suit: suit, tr: tr)) * 0.8
         return urgency
     }
@@ -1174,7 +1179,7 @@ extension AIPlayer {
         let sideCards = hand.filter { !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr) }
         let pairedIDs = pairedCardIDs(in: sideCards, trumpSuit: ts, trumpRank: tr)
         var bySuit: [Suit: [Card]] = [:]
-        for card in sideCards where ctx.isEffectivelyBiggest(card, ts: ts, tr: tr) {
+        for card in sideCards where ctx.isEffectivelyBiggest(card, ts: ts, tr: tr, hand: hand) {
             guard let suit = card.suit else { continue }
             if ctx.allEnemiesVoid(myTeam: myTeam, key: suit.rawValue) { continue }
             bySuit[suit, default: []].append(card)
@@ -1409,7 +1414,9 @@ extension AIPlayer {
             return min(0.95, 0.35 + Double(high) / 120.0)
         }
 
-        let allBig = cards.allSatisfy { ctx.isEffectivelyBiggest($0, ts: ts, tr: tr) }
+        let allBig = cards.allSatisfy {
+            ctx.isEffectivelyBiggest($0, ts: ts, tr: tr, hand: hand)
+        }
         if allBig { return 0.78 }
         if cards.contains(where: { $0.rank == .ace }) { return 0.62 }
         let high = cards.map(\.rank.rawValue).max() ?? 0

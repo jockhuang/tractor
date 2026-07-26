@@ -723,6 +723,23 @@ final class AITacticalModeTests: XCTestCase {
         return t
     }
 
+    private func playerVoidHeartsTrick(_ voidPosition: PlayerPosition) -> Trick {
+        var t = Trick(leadPosition: .south)
+        let ranks: [PlayerPosition: Rank] = [
+            .south: .three,
+            .west: .four,
+            .north: .six,
+            .east: .seven
+        ]
+        for position in PlayerPosition.allCases {
+            let card = position == voidPosition
+                ? c(.clubs, .eight)
+                : c(.hearts, ranks[position]!)
+            t.plays.append((position: position, cards: [card]))
+        }
+        return t
+    }
+
     private func beats(_ a: Card, _ b: Card) -> Bool {
         CardComparator.beats(a, b, trumpSuit: ts, trumpRank: tr)
     }
@@ -812,6 +829,70 @@ final class AITacticalModeTests: XCTestCase {
         let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
         XCTAssertEqual(chosen.map { $0.shortDisplay }, ["♠3"],
                        "P2 即使需要主动权，也不应把主K送进后手对手可能赢的0分墩，chosen=\(chosen.map { $0.shortDisplay })")
+    }
+
+    func testSecondHandKnownVoidOpponentUsesTrumpAceInsteadOfPointTrump() {
+        let s = makeState()
+        s.completedTricks = [playerVoidHeartsTrick(.north)]
+        setTrick(s, lead: .south,
+                 plays: [(.south, [c(.hearts, .king)])],
+                 turn: .west)
+        setHand(s, .west,
+                [c(.spades, .ace), c(.clubs, .two), c(.spades, .ten),
+                 c(nil, .smallJoker), c(.diamonds, .three)])
+
+        let chosen = AIPlayer.chooseCards(position: .west, state: s, evaluator: eval)
+        XCTAssertEqual(chosen.map(\.shortDisplay), ["♠A"],
+                       "P2 后手对手也绝门时，应使用最小可赢的主A/级牌，不用主分或王，chosen=\(chosen.map(\.shortDisplay))")
+    }
+
+    func testThirdHandKnownVoidOpponentUsesLevelCard() {
+        let s = makeState()
+        s.completedTricks = [playerVoidHeartsTrick(.east)]
+        setTrick(s, lead: .south,
+                 plays: [
+                    (.south, [c(.hearts, .five)]),
+                    (.west, [c(.hearts, .king)])
+                 ],
+                 turn: .north)
+        setHand(s, .north,
+                [c(.clubs, .two), c(.spades, .ten),
+                 c(nil, .bigJoker), c(.diamonds, .three)])
+
+        let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
+        XCTAssertEqual(chosen.map(\.shortDisplay), ["♣2"],
+                       "P3 后手对手也绝门时，有级牌应使用级牌管分，不用主分或王，chosen=\(chosen.map(\.shortDisplay))")
+    }
+
+    func testSecondHandKnownVoidOpponentDiscardsZeroPointWhenTrumpsAreWeak() {
+        let s = makeState()
+        s.completedTricks = [playerVoidHeartsTrick(.north)]
+        setTrick(s, lead: .south,
+                 plays: [(.south, [c(.hearts, .king)])],
+                 turn: .west)
+        setHand(s, .west, [c(.spades, .ten), c(.spades, .five), c(.diamonds, .three)])
+
+        let chosen = AIPlayer.chooseCards(position: .west, state: s, evaluator: eval)
+        XCTAssertEqual(chosen.map(\.shortDisplay), ["♦3"],
+                       "P2 只有弱主/主分时应垫0分副牌，chosen=\(chosen.map(\.shortDisplay))")
+    }
+
+    func testThirdHandKnownVoidOpponentDoesNotSpendJokersOnContest() {
+        let s = makeState()
+        s.completedTricks = [playerVoidHeartsTrick(.east)]
+        setTrick(s, lead: .south,
+                 plays: [
+                    (.south, [c(.hearts, .five)]),
+                    (.west, [c(.hearts, .king)])
+                 ],
+                 turn: .north)
+        setHand(s, .north,
+                [c(nil, .bigJoker), c(nil, .smallJoker),
+                 c(.spades, .ten), c(.diamonds, .three)])
+
+        let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
+        XCTAssertEqual(chosen.map(\.shortDisplay), ["♦3"],
+                       "P3 该类竞争不应动大小王，应垫0分副牌，chosen=\(chosen.map(\.shortDisplay))")
     }
 
     // 开局主牌很多也不应直接领对王；拔主应先用低成本小主，保留最高控制对。

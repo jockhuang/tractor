@@ -994,6 +994,316 @@ do {
     )
 }
 
+// ── Test 16：AI 审查回归——信息推断、甩牌盖吃、隐藏牌约束与战术模式 ──
+do {
+    var partialFollow = Trick(leadPosition: .south)
+    partialFollow.plays = [
+        (.south, [c(.hearts, .seven), c(.hearts, .seven)]),
+        (.west, [c(.hearts, .king), c(.clubs, .three)]),
+        (.north, [c(.hearts, .four), c(.hearts, .five)]),
+        (.east, [c(.hearts, .six), c(.hearts, .eight)])
+    ]
+
+    let completedState = makeState(trump: ts, rank: tr)
+    completedState.completedTricks = [partialFollow]
+    let completedContext = AIContext.build(state: completedState, ts: ts, tr: tr)
+    check(
+        completedContext.isVoid(.west, key: Suit.hearts.rawValue),
+        "Test16a 部分跟牌后正确记录绝门"
+    )
+
+    let currentState = makeState(trump: ts, rank: tr)
+    currentState.currentTrick = partialFollow
+    let currentContext = AIContext.build(state: currentState, ts: ts, tr: tr)
+    check(
+        currentContext.isVoid(.west, key: Suit.hearts.rawValue),
+        "Test16b 当前墩绝门立即进入AI记忆"
+    )
+
+    let leadSlam = [
+        c(.hearts, .seven), c(.hearts, .seven), c(.hearts, .king)
+    ]
+    let leadInfo = eval.slamInfo(of: leadSlam)!
+    let highSingleWinner = [
+        c(.spades, .three), c(.spades, .three), c(.spades, .ace)
+    ]
+    let structurallyHigher = [
+        c(.spades, .five), c(.spades, .five), c(.spades, .six)
+    ]
+    let structuralBuild = AIPlayer.buildMatchingSlamTrump(
+        slam: leadInfo,
+        trumpCards: structurallyHigher,
+        winningCards: highSingleWinner,
+        ts: ts,
+        tr: tr
+    )
+    var structuralTrick = Trick(leadPosition: .south)
+    structuralTrick.plays = [
+        (.south, leadSlam),
+        (.west, highSingleWinner),
+        (.north, structuralBuild ?? [])
+    ]
+    check(
+        structuralBuild != nil && eval.winner(of: structuralTrick) == .north,
+        "Test16c 甩牌盖吃按对子结构而非最高单张比较",
+        "built=\(structuralBuild?.map { $0.shortDisplay } ?? [])"
+    )
+
+    let pairSlotSlam = [
+        c(.hearts, .seven), c(.hearts, .seven),
+        c(.hearts, .nine), c(.hearts, .jack), c(.hearts, .king)
+    ]
+    let lowerTractorWithAce = [
+        c(.spades, .three), c(.spades, .three),
+        c(.spades, .four), c(.spades, .four),
+        c(.spades, .ace)
+    ]
+    let higherTractorWithLowSingle = [
+        c(.spades, .five), c(.spades, .five),
+        c(.spades, .six), c(.spades, .six),
+        c(.spades, .seven)
+    ]
+    var tractorCoversPairTrick = Trick(leadPosition: .south)
+    tractorCoversPairTrick.plays = [
+        (.south, pairSlotSlam),
+        (.west, lowerTractorWithAce),
+        (.north, higherTractorWithLowSingle)
+    ]
+    check(
+        eval.winner(of: tractorCoversPairTrick) == .north,
+        "Test16c.1 连对覆盖甩牌对子槽时仍按最高对子比较"
+    )
+
+    let lowAndWinningPairs = [
+        c(.spades, .three), c(.spades, .three), c(.spades, .four),
+        c(.spades, .seven), c(.spades, .seven)
+    ]
+    let mediumWinner = [
+        c(.spades, .five), c(.spades, .five), c(.spades, .six)
+    ]
+    let searchedBuild = AIPlayer.buildMatchingSlamTrump(
+        slam: leadInfo,
+        trumpCards: lowAndWinningPairs,
+        winningCards: mediumWinner,
+        ts: ts,
+        tr: tr
+    )
+    check(
+        searchedBuild?.filter { $0.rank == .seven }.count == 2,
+        "Test16d 最弱结构压不过时继续搜索更大可赢组合",
+        "built=\(searchedBuild?.map { $0.shortDisplay } ?? [])"
+    )
+
+    let sampleState = makeState(trump: ts, rank: tr)
+    sampleState.dealerPosition = .south
+    var voidEvidence = Trick(leadPosition: .west)
+    voidEvidence.plays = [
+        (.west, [c(.hearts, .three)]),
+        (.north, [c(.clubs, .three)]),
+        (.east, [c(.diamonds, .three)]),
+        (.south, [c(.hearts, .four)])
+    ]
+    sampleState.completedTricks = [voidEvidence]
+    let afterPlayed = AIPlayer.removeKnownFaces(
+        from: Deck.doubleDeck(),
+        knownCards: voidEvidence.plays.flatMap(\.cards)
+    )
+    let currentKnownHand = Array(afterPlayed.prefix(24))
+    sampleState.kitty = Array(afterPlayed.dropFirst(24).prefix(8))
+    sampleState.players[PlayerPosition.south.rawValue].hand = currentKnownHand
+    for position in [PlayerPosition.west, .north, .east] {
+        // 隐藏牌内容不会被读取；这里只需要公开的剩余手牌张数。
+        sampleState.players[position.rawValue].hand = Array(afterPlayed.prefix(24))
+    }
+    var allSamplesRespectKnowledge = true
+    for seed in 1...20 {
+        var sampleRNG = AIPlayer.MonteCarloRNG(seed: UInt64(seed))
+        let sampled = AIPlayer.sampleHiddenHands(
+            currentPosition: .south,
+            currentHand: currentKnownHand,
+            playedCandidate: [],
+            state: sampleState,
+            rng: &sampleRNG
+        )
+        let correctCounts = [PlayerPosition.west, .north, .east].allSatisfy {
+            sampled[$0, default: []].count == 24
+        }
+        let voidViolation = [PlayerPosition.north, .east].contains { position in
+            sampled[position, default: []].contains {
+                AIContext.suitKey($0, ts: ts, tr: tr) == Suit.hearts.rawValue
+            }
+        }
+        allSamplesRespectKnowledge = allSamplesRespectKnowledge
+            && correctCounts
+            && !voidViolation
+    }
+    check(
+        allSamplesRespectKnowledge,
+        "Test16e 蒙特卡洛发牌严格遵守绝门和手牌容量"
+    )
+
+    let emptyState = makeState(trump: ts, rank: tr)
+    let emptyContext = AIContext.build(state: emptyState, ts: ts, tr: tr)
+    check(
+        !AIPlayer.isSafeTrump(c(nil, .smallJoker), hand: [], ts: ts, tr: tr, ctx: emptyContext) &&
+            AIPlayer.isSafeTrump(c(nil, .bigJoker), hand: [], ts: ts, tr: tr, ctx: emptyContext),
+        "Test16f 小王仍有未知大王时不能判定锁定"
+    )
+
+    let ownControlledHigher = [
+        c(.hearts, .king), c(.hearts, .ace), c(.hearts, .ace)
+    ]
+    check(
+        emptyContext.isEffectivelyBiggest(
+            ownControlledHigher[0],
+            ts: ts,
+            tr: tr,
+            hand: ownControlledHigher
+        ),
+        "Test16g 自己持有全部更大牌时正确识别当前最大"
+    )
+
+    let modeState = makeState(trump: ts, rank: tr)
+    setTrick(
+        modeState,
+        lead: .south,
+        plays: [(.south, [c(.hearts, .ten)])],
+        turn: .west
+    )
+    modeState.players[PlayerPosition.west.rawValue].hand = [
+        c(.hearts, .king), c(.hearts, .three)
+    ]
+    check(
+        AIPlayer._testDetectTacticalMode(
+            position: .west,
+            state: modeState,
+            evaluator: eval
+        ) == .forceOpponentCost,
+        "Test16h 暂时压过但未锁定时进入逼牌模式"
+    )
+
+    let seed0 = AIPlayer.monteCarloSeed(
+        position: .west,
+        state: modeState,
+        simulation: 0
+    )
+    let seed0Again = AIPlayer.monteCarloSeed(
+        position: .west,
+        state: modeState,
+        simulation: 0
+    )
+    let seed1 = AIPlayer.monteCarloSeed(
+        position: .west,
+        state: modeState,
+        simulation: 1
+    )
+    check(
+        seed0 == seed0Again && seed0 != seed1,
+        "Test16i 同轮候选共享隐藏世界且不同模拟仍有独立种子"
+    )
+}
+
+// ── Test 17：P2/P3 已知后手对手也绝门时，只用主A/级牌竞争 ──
+do {
+    func playerVoidHeartsTrick(_ voidPosition: PlayerPosition) -> Trick {
+        var trick = Trick(leadPosition: .south)
+        let ranks: [PlayerPosition: Rank] = [
+            .south: .three,
+            .west: .four,
+            .north: .six,
+            .east: .seven
+        ]
+        for position in PlayerPosition.allCases {
+            let card = position == voidPosition
+                ? c(.clubs, .eight)
+                : c(.hearts, ranks[position]!)
+            trick.plays.append((position: position, cards: [card]))
+        }
+        return trick
+    }
+
+    let p2Strong = makeState(trump: ts, rank: tr)
+    p2Strong.completedTricks = [playerVoidHeartsTrick(.north)]
+    setTrick(
+        p2Strong,
+        lead: .south,
+        plays: [(.south, [c(.hearts, .king)])],
+        turn: .west
+    )
+    p2Strong.players[PlayerPosition.west.rawValue].hand = [
+        c(.spades, .ace), c(.clubs, .two), c(.spades, .ten),
+        c(nil, .smallJoker), c(.diamonds, .three)
+    ]
+    let p2StrongChosen = AIPlayer.chooseCards(position: .west, state: p2Strong, evaluator: eval)
+    check(
+        p2StrongChosen.map(\.shortDisplay) == ["♠A"],
+        "Test17a P2用最小可赢主A/级牌竞争，不用主分或王",
+        "chosen=\(p2StrongChosen.map(\.shortDisplay))"
+    )
+
+    let p3Strong = makeState(trump: ts, rank: tr)
+    p3Strong.completedTricks = [playerVoidHeartsTrick(.east)]
+    setTrick(
+        p3Strong,
+        lead: .south,
+        plays: [
+            (.south, [c(.hearts, .five)]),
+            (.west, [c(.hearts, .king)])
+        ],
+        turn: .north
+    )
+    p3Strong.players[PlayerPosition.north.rawValue].hand = [
+        c(.clubs, .two), c(.spades, .ten),
+        c(nil, .bigJoker), c(.diamonds, .three)
+    ]
+    let p3StrongChosen = AIPlayer.chooseCards(position: .north, state: p3Strong, evaluator: eval)
+    check(
+        p3StrongChosen.map(\.shortDisplay) == ["♣2"],
+        "Test17b P3有级牌时用级牌竞争，不用主分或王",
+        "chosen=\(p3StrongChosen.map(\.shortDisplay))"
+    )
+
+    let p2Weak = makeState(trump: ts, rank: tr)
+    p2Weak.completedTricks = [playerVoidHeartsTrick(.north)]
+    setTrick(
+        p2Weak,
+        lead: .south,
+        plays: [(.south, [c(.hearts, .king)])],
+        turn: .west
+    )
+    p2Weak.players[PlayerPosition.west.rawValue].hand = [
+        c(.spades, .ten), c(.spades, .five), c(.diamonds, .three)
+    ]
+    let p2WeakChosen = AIPlayer.chooseCards(position: .west, state: p2Weak, evaluator: eval)
+    check(
+        p2WeakChosen.map(\.shortDisplay) == ["♦3"],
+        "Test17c P2只有弱主/主分时垫0分副牌",
+        "chosen=\(p2WeakChosen.map(\.shortDisplay))"
+    )
+
+    let p3Jokers = makeState(trump: ts, rank: tr)
+    p3Jokers.completedTricks = [playerVoidHeartsTrick(.east)]
+    setTrick(
+        p3Jokers,
+        lead: .south,
+        plays: [
+            (.south, [c(.hearts, .five)]),
+            (.west, [c(.hearts, .king)])
+        ],
+        turn: .north
+    )
+    p3Jokers.players[PlayerPosition.north.rawValue].hand = [
+        c(nil, .bigJoker), c(nil, .smallJoker),
+        c(.spades, .ten), c(.diamonds, .three)
+    ]
+    let p3JokersChosen = AIPlayer.chooseCards(position: .north, state: p3Jokers, evaluator: eval)
+    check(
+        p3JokersChosen.map(\.shortDisplay) == ["♦3"],
+        "Test17d P3该类竞争不动大小王，改垫0分副牌",
+        "chosen=\(p3JokersChosen.map(\.shortDisplay))"
+    )
+}
+
 print(String(repeating: "─", count: 40))
 if failures.isEmpty {
     print("ALL TESTS PASSED ✅")
