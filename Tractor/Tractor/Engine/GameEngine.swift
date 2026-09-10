@@ -20,6 +20,7 @@ class GameEngine: ObservableObject {
     private var lastDrawnCardIDsByPosition: [PlayerPosition: UUID] = [:]
     let multiplayer = LANMultiplayerManager()
     @Published var localPosition: PlayerPosition = .south
+    @Published var easyModeEnabled = false
     private var humanControlledPositions: Set<PlayerPosition> = [.south]
 
     var localPlayer: Player { state.player(localPosition) }
@@ -53,9 +54,16 @@ class GameEngine: ObservableObject {
         cancelScheduledTurnWork()
         localPosition = .south
         humanControlledPositions = [.south]
-        state.selectedCards = []
-        state.lastRoundResult = nil
-        state.phase = .menu
+        state = GameState()
+    }
+
+    func exitCurrentGame() {
+        dealingTask?.cancel()
+        cancelScheduledTurnWork()
+        multiplayer.leave()
+        localPosition = .south
+        humanControlledPositions = [.south]
+        state = GameState()
     }
 
     func startMultiplayerGame(
@@ -108,7 +116,9 @@ class GameEngine: ObservableObject {
     // MARK: - 逐张发牌（动画）
 
     private func dealCardsAnimated() async {
-        let deck = Deck.doubleDeck().shuffled()
+        let deck = easyModeEnabled && multiplayer.mode == .none
+            ? Deck.easyModeDeck(trumpRank: state.trumpRank)
+            : Deck.doubleDeck().shuffled()
         let order: [PlayerPosition] = [.south, .west, .north, .east]
 
         for i in 0..<100 {

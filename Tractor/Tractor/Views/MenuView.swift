@@ -64,6 +64,19 @@ struct MenuView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 14))
                         .shadow(color: .blue.opacity(0.4), radius: 8, y: 4)
                     }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Toggle(isOn: $engine.easyModeEnabled) {
+                            Label("欢乐模式", systemImage: "sparkles")
+                                .font(.headline)
+                                .foregroundColor(.white.opacity(0.9))
+                        }
+                        .tint(.yellow)
+
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(Color.white.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
                     Button(action: { showLobby.toggle() }) {
                         HStack {
                             Image(systemName: "network")

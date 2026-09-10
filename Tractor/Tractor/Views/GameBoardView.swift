@@ -107,7 +107,8 @@ struct GameBoardView: View {
                 isHistoryPresented: showHistory,
                 soundEnabled: soundEnabled,
                 onToggleHistory: toggleHistory,
-                onToggleSound: toggleSound
+                onToggleSound: toggleSound,
+                onQuit: quitToMenu
             )
             .padding(.horizontal, metrics.overlayHorizontalPadding)
             .padding(.top, metrics.overlayTopPadding)
@@ -414,10 +415,7 @@ struct GameBoardView: View {
     }
 
     private func quitToMenu() {
-        engine.multiplayer.leave()
-        withAnimation {
-            engine.state.phase = .menu
-        }
+        engine.exitCurrentGame()
     }
 }
 
@@ -430,6 +428,7 @@ private struct GameStatusBar: View {
     let soundEnabled: Bool
     let onToggleHistory: () -> Void
     let onToggleSound: () -> Void
+    let onQuit: () -> Void
 
     private var scoreBackgroundColor: Color {
         attackScore >= 80 ? Color.green.opacity(0.55) : Color.black.opacity(0.55)
@@ -502,6 +501,21 @@ private struct GameStatusBar: View {
                     .background(Color.black.opacity(0.55))
                     .clipShape(Circle())
             }
+
+            Button(action: onQuit) {
+                HStack(spacing: 3) {
+                    Image(systemName: "rectangle.portrait.and.arrow.right")
+                        .font(.system(size: 10))
+                    Text("退出")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(Color.red.opacity(0.7))
+                .clipShape(Capsule())
+            }
+            .accessibilityLabel("退出当前游戏并返回开始界面")
         }
     }
 }

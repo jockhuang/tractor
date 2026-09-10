@@ -358,7 +358,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Tractor/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17;
-				MARKETING_VERSION = 1.3;
+				MARKETING_VERSION = 2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jock.game.tractor;
 				PRODUCT_NAME = "Tractor Game";
 				SDKROOT = iphoneos;
@@ -382,7 +382,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Tractor/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17;
-				MARKETING_VERSION = 1.3;
+				MARKETING_VERSION = 2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jock.game.tractor;
 				PRODUCT_NAME = "Tractor Game";
 				SDKROOT = iphoneos;
