@@ -1,6 +1,8 @@
 import XCTest
 import SwiftUI
 import UIKit
+import StoreKit
+import StoreKitTest
 @testable import Tractor_Game
 
 /// Renders a realistic dark-mode hand row to a bitmap on the simulator and measures
@@ -76,6 +78,92 @@ final class CardViewLayoutTests: XCTestCase {
         XCTAssertGreaterThan(vectorH, 60, "vector card height looks wrong: \(vectorH)")
         XCTAssertEqual(heights[0], vectorH, accuracy: 6, "small joker height != vector")
         XCTAssertEqual(heights[4], vectorH, accuracy: 6, "big joker height != vector")
+    }
+}
+
+final class LevelProgressionTests: XCTestCase {
+    func testReachingAceStillRequiresPlayingAceRound() {
+        let progress = LevelProgression.advancing(from: .king, by: 3)
+
+        XCTAssertEqual(progress.level, .ace)
+        XCTAssertFalse(progress.passedAce)
+    }
+
+    func testZeroAdvanceAtAceDoesNotWinGame() {
+        let progress = LevelProgression.advancing(from: .ace, by: 0)
+
+        XCTAssertEqual(progress.level, .ace)
+        XCTAssertFalse(progress.passedAce)
+    }
+
+    func testAdvancingFromAceWinsGame() {
+        let progress = LevelProgression.advancing(from: .ace, by: 1)
+
+        XCTAssertEqual(progress.level, .ace)
+        XCTAssertTrue(progress.passedAce)
+    }
+}
+
+@MainActor
+final class RemoveAdsSubscriptionStoreKitTests: XCTestCase {
+    private let productID = AdsManager.removeAdsSubscriptionProductID
+
+    func testLocalConfigurationDefinesOnlyMonthlySubscription() throws {
+        let configurationURL = try XCTUnwrap(
+            Bundle(for: Self.self).url(
+                forResource: "AdFreeSubscription",
+                withExtension: "storekit"
+            )
+        )
+        let data = try Data(contentsOf: configurationURL)
+        let root = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        let products = root["products"] as? [[String: Any]] ?? []
+        let groups = try XCTUnwrap(root["subscriptionGroups"] as? [[String: Any]])
+        let subscriptions = groups.flatMap {
+            $0["subscriptions"] as? [[String: Any]] ?? []
+        }
+        let subscription = try XCTUnwrap(subscriptions.first {
+            $0["productID"] as? String == productID
+        })
+
+        XCTAssertTrue(products.isEmpty, "The local configuration must not contain a one-time purchase.")
+        XCTAssertEqual(subscriptions.count, 1)
+        XCTAssertEqual(subscription["type"] as? String, "RecurringSubscription")
+        XCTAssertEqual(subscription["recurringSubscriptionPeriod"] as? String, "P1M")
+    }
+
+    func testLocalSubscriptionPurchaseCompletes() async throws {
+        let session = try SKTestSession(configurationFileNamed: "AdFreeSubscription")
+        session.disableDialogs = true
+        session.timeRate = .realTime
+        session.clearTransactions()
+        defer { session.clearTransactions() }
+
+        do {
+            let transaction = try await session.buyProduct(identifier: productID)
+
+            XCTAssertEqual(transaction.productID, productID)
+            XCTAssertEqual(transaction.productType, .autoRenewable)
+            XCTAssertNil(transaction.revocationDate)
+            XCTAssertNotNil(transaction.expirationDate)
+            await transaction.finish()
+        } catch StoreKitError.notEntitled {
+            throw XCTSkip(
+                "Xcode 26.3+ StoreKitTest can return notEntitled even when the local " +
+                "configuration and In-App Purchase capability are valid."
+            )
+        } catch {
+            let nsError = error as NSError
+            guard nsError.domain == "SKInternalErrorDomain", nsError.code == 3 else {
+                throw error
+            }
+            throw XCTSkip(
+                "StoreKitTest reported the Xcode framework's equivalent internal " +
+                "error for the known notEntitled failure."
+            )
+        }
     }
 }
 
@@ -212,6 +300,199 @@ final class SlamFailureTests: XCTestCase {
         XCTAssertTrue(queens.allSatisfy { queen in
             state.player(.north).hand.contains { $0.id == queen.id }
         })
+    }
+}
+
+final class GameTurnOwnershipTests: XCTestCase {
+    @MainActor
+    func testHumanOpeningPlaySurvivesRepeatedKittyConfirmation() {
+        let previousSoundSetting = UserDefaults.standard.object(forKey: "soundEnabled")
+        UserDefaults.standard.set(false, forKey: "soundEnabled")
+        defer {
+            if let previousSoundSetting {
+                UserDefaults.standard.set(previousSoundSetting, forKey: "soundEnabled")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "soundEnabled")
+            }
+        }
+
+        let engine = GameEngine()
+        let state = engine.state
+        state.phase = .dealing
+        state.dealtCount = 100
+        state.trumpRank = .two
+        let declaration = Card(suit: .hearts, rank: .two)
+        let opening = Card(suit: .hearts, rank: .ace)
+        state.player(.south).hand = [declaration, opening,
+                                     Card(suit: .clubs, rank: .king),
+                                     Card(suit: .clubs, rank: .queen)]
+        let kitty = [Rank.three, .four, .five, .six, .seven, .eight, .nine, .ten]
+            .map { Card(suit: .diamonds, rank: $0) }
+        state.kitty = kitty
+
+        // 发牌倒计时期间亮主，提前进入真人换底。
+        engine.humanDeclareTrump(position: .south, selectedIDs: [declaration.id])
+        XCTAssertEqual(state.phase, .kittyExchange)
+        XCTAssertEqual(state.player(.south).hand.count, 12)
+        let kittyIDs = Set(kitty.map(\.id))
+        engine.confirmKittyExchange(position: .west, selectedIDs: kittyIDs)
+        XCTAssertEqual(state.phase, .kittyExchange)
+        engine.confirmKittyExchange(position: .south, selectedIDs: kittyIDs)
+        XCTAssertEqual(state.phase, .playing)
+        XCTAssertEqual(state.player(.south).hand.count, 4)
+
+        engine.humanPlay(position: .south, selectedIDs: [opening.id])
+        XCTAssertEqual(state.currentTrick.plays.first?.cards.map(\.id), [opening.id])
+        let handAfterOpening = state.player(.south).hand.map(\.id)
+        let kittyAfterOpening = state.kitty.map(\.id)
+
+        // 过期确认不能再扣底或清空已出的第一张牌。
+        engine.confirmKittyExchange(position: .south, selectedIDs: kittyIDs)
+        XCTAssertEqual(state.phase, .playing)
+        XCTAssertEqual(state.currentTrick.plays.first?.cards.map(\.id), [opening.id])
+        XCTAssertEqual(state.player(.south).hand.map(\.id), handAfterOpening)
+        XCTAssertEqual(state.kitty.map(\.id), kittyAfterOpening)
+    }
+
+    @MainActor
+    func testScheduledOpeningAIPassesTurnForEveryAISeat() async {
+        let previousSoundSetting = UserDefaults.standard.object(forKey: "soundEnabled")
+        UserDefaults.standard.set(false, forKey: "soundEnabled")
+        defer {
+            if let previousSoundSetting {
+                UserDefaults.standard.set(previousSoundSetting, forKey: "soundEnabled")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "soundEnabled")
+            }
+        }
+
+        for leader in [PlayerPosition.west, .north, .east] {
+            let next = PlayerPosition(rawValue: (leader.rawValue + 1) % 4)!
+            let engine = GameEngine()
+            let state = engine.state
+            state.phase = .kittyExchange
+            state.trumpSuit = .spades
+            state.trumpRank = .two
+            state.dealerPosition = leader
+            state.dealerTeamIdx = leader.team
+
+            let kitty = [Rank.three, .four, .five, .six, .seven, .eight, .nine, .ten]
+                .map { Card(suit: .diamonds, rank: $0) }
+            state.player(leader).hand = [Card(suit: .hearts, rank: .ace),
+                                         Card(suit: .clubs, rank: .ace)] + kitty
+            for position in PlayerPosition.allCases where position != leader {
+                let rank = Rank(rawValue: position.rawValue + 3)!
+                state.player(position).hand = [Card(suit: .hearts, rank: rank),
+                                               Card(suit: .clubs, rank: rank)]
+            }
+
+            engine.confirmKittyExchange(position: leader, selectedIDs: Set(kitty.map(\.id)))
+            for _ in 0..<100 where state.currentTrick.plays.isEmpty {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            XCTAssertEqual(state.currentTrick.plays.first?.position, leader, leader.seatName)
+            XCTAssertEqual(state.currentTurn, next, leader.seatName)
+            guard let leadSuit = state.currentTrick.leadCards?.first?.suit else {
+                engine.exitCurrentGame()
+                continue
+            }
+
+            if next == .south {
+                let follow = state.player(.south).hand.first { $0.suit == leadSuit }!
+                engine.humanPlay(position: .south, selectedIDs: [follow.id])
+            } else {
+                for _ in 0..<100 where state.currentTrick.plays.count < 2 {
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                }
+            }
+            XCTAssertEqual(state.currentTrick.plays.prefix(2).map(\.position), [leader, next], leader.seatName)
+            engine.exitCurrentGame()
+        }
+    }
+
+    @MainActor
+    func testEveryAISeatWaitsForAllFollowersAfterOpeningLead() async {
+        let previousSoundSetting = UserDefaults.standard.object(forKey: "soundEnabled")
+        UserDefaults.standard.set(false, forKey: "soundEnabled")
+        defer {
+            if let previousSoundSetting {
+                UserDefaults.standard.set(previousSoundSetting, forKey: "soundEnabled")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "soundEnabled")
+            }
+        }
+
+        for leader in [PlayerPosition.west, .north, .east] {
+            await verifyOpeningTurnOrder(leader: leader, isSlam: false)
+            await verifyOpeningTurnOrder(leader: leader, isSlam: true)
+        }
+    }
+
+    @MainActor
+    private func verifyOpeningTurnOrder(leader: PlayerPosition, isSlam: Bool) async {
+        func seat(_ offset: Int) -> PlayerPosition {
+            PlayerPosition(rawValue: (leader.rawValue + offset) % 4)!
+        }
+        func cards(_ suit: Suit, _ ranks: [Rank]) -> [Card] {
+            ranks.map { Card(suit: suit, rank: $0) }
+        }
+        let caseName = "\(leader.seatName)先手\(isSlam ? "甩牌" : "单张")"
+
+        let engine = GameEngine()
+        let state = engine.state
+        state.phase = .playing
+        state.trumpSuit = .spades
+        state.trumpRank = .two
+        state.dealerPosition = leader
+        state.dealerTeamIdx = leader.team
+        state.currentLeader = leader
+        state.currentTurn = leader
+        state.currentTrick = Trick(leadPosition: leader)
+
+        // A+KK 没有可压制的单张或对子，是合法甩牌；第二墩保留同样张数供抢跑尝试。
+        let leadRanks: [Rank] = isSlam ? [.ace, .king, .king] : [.ace]
+        let followerRanks: [[Rank]] = isSlam
+            ? [[.three, .three, .four], [.five, .five, .six], [.seven, .seven, .eight]]
+            : [[.three], [.four], [.five]]
+        let firstLead = cards(.hearts, leadRanks)
+        let secondLead = cards(.clubs, leadRanks)
+        let firstFollows = followerRanks.map { cards(.hearts, $0) }
+        let secondFollows = followerRanks.map { cards(.clubs, $0) }
+        state.player(leader).hand = firstLead + secondLead
+        for offset in 1...3 {
+            state.player(seat(offset)).hand = firstFollows[offset - 1] + secondFollows[offset - 1]
+        }
+
+        engine.humanPlay(position: leader, selectedIDs: Set(firstLead.map(\.id)))
+        XCTAssertEqual(state.currentTrick.plays.count, 1, caseName)
+        XCTAssertEqual(state.currentTrick.leadCards?.map(\.id), firstLead.map(\.id), caseName)
+        XCTAssertEqual(state.currentTurn, seat(1), caseName)
+
+        // 模拟过期回调把 currentTurn 写回先手；本墩牌序仍必须拒绝其重出。
+        state.currentTurn = leader
+        engine.humanPlay(position: leader, selectedIDs: Set(secondLead.map(\.id)))
+        XCTAssertEqual(state.currentTrick.plays.count, 1, caseName)
+        XCTAssertEqual(state.player(leader).hand.map(\.id), secondLead.map(\.id), caseName)
+        state.currentTurn = seat(1)
+
+        for offset in 1...3 {
+            engine.humanPlay(position: seat(offset), selectedIDs: Set(firstFollows[offset - 1].map(\.id)))
+            if offset < 3 {
+                XCTAssertEqual(state.currentTurn, seat(offset + 1), caseName)
+            }
+        }
+        XCTAssertTrue(state.isResolvingTrick, caseName)
+        try? await Task.sleep(nanoseconds: 1_800_000_000)
+        XCTAssertEqual(state.completedTricks.count, 1, caseName)
+        XCTAssertEqual(state.currentTurn, leader, caseName)
+
+        engine.humanPlay(position: leader, selectedIDs: Set(secondLead.map(\.id)))
+        for offset in 1...3 {
+            engine.humanPlay(position: seat(offset), selectedIDs: Set(secondFollows[offset - 1].map(\.id)))
+        }
+        try? await Task.sleep(nanoseconds: 1_800_000_000)
+        XCTAssertEqual(state.completedTricks.count, 2, caseName)
+        XCTAssertEqual(state.phase, .roundEnd, caseName)
     }
 }
 
@@ -740,11 +1021,71 @@ final class AITacticalModeTests: XCTestCase {
         return t
     }
 
+    private func seat(after position: PlayerPosition, offset: Int) -> PlayerPosition {
+        PlayerPosition(rawValue: (position.rawValue + offset) % PlayerPosition.allCases.count)!
+    }
+
+    private func pointExposureRegressionHistory(leader: PlayerPosition) -> [Trick] {
+        var first = Trick(leadPosition: leader)
+        first.plays = [
+            (position: seat(after: leader, offset: 0), cards: [c(.spades, .ace)]),
+            (position: seat(after: leader, offset: 1), cards: [c(.spades, .four)]),
+            (position: seat(after: leader, offset: 2), cards: [c(.spades, .ten)]),
+            (position: seat(after: leader, offset: 3), cards: [c(.spades, .three)])
+        ]
+
+        var second = Trick(leadPosition: leader)
+        second.plays = [
+            (position: seat(after: leader, offset: 0), cards: [c(.spades, .jack), c(.spades, .jack)]),
+            (position: seat(after: leader, offset: 1), cards: [c(.spades, .eight), c(.spades, .eight)]),
+            (position: seat(after: leader, offset: 2), cards: [c(.spades, .five), c(.spades, .five)]),
+            (position: seat(after: leader, offset: 3), cards: [c(.spades, .six), c(.spades, .seven)])
+        ]
+        return [first, second]
+    }
+
+    private func pointExposureRegressionPlays(
+        leader: PlayerPosition,
+        playsBeforeDecision: Int
+    ) -> [(PlayerPosition, [Card])] {
+        let ranks: [Rank] = [.three, .six]
+        return (0..<playsBeforeDecision).map { offset in
+            (seat(after: leader, offset: offset), [c(.diamonds, ranks[offset])])
+        }
+    }
+
+    private func pointExposureRegressionHand(
+        pointRank: Rank,
+        safeTrump: Card? = Card(suit: .diamonds, rank: .four)
+    ) -> [Card] {
+        var hand = [c(.diamonds, pointRank)]
+        if let safeTrump { hand.append(safeTrump) }
+        let sideRanks: [Rank] = [.three, .four, .five, .six, .seven, .eight,
+                                 .nine, .ten, .jack, .queen, .king, .ace]
+        let sideCards = sideRanks.map { c(.hearts, $0) } + sideRanks.map { c(.clubs, $0) }
+        hand += sideCards.prefix(22 - hand.count)
+        return hand
+    }
+
+    private func controlTrumpRegressionHand() -> [Card] {
+        var hand = [
+            c(.diamonds, .ace), c(.diamonds, .four),
+            c(.hearts, .ace), c(.clubs, .ace), c(.spades, .ace),
+            c(.hearts, .king), c(.hearts, .king),
+            c(.clubs, .queen), c(.clubs, .queen),
+            c(.spades, .jack), c(.spades, .jack)
+        ]
+        let fillers = [Rank.three, .four, .six, .seven, .eight, .nine]
+            .flatMap { [c(.hearts, $0), c(.clubs, $0)] }
+        hand += fillers.prefix(22 - hand.count)
+        return hand
+    }
+
     private func beats(_ a: Card, _ b: Card) -> Bool {
         CardComparator.beats(a, b, trumpSuit: ts, trumpRank: tr)
     }
 
-    // Test 1：当前墩有分，对手领先，AI(北=P3) 有主A可压 → 应压过而非垫小牌（也不能用 K）。
+    // Test 1：当前墩有分，对手领先，AI 有主A可压 → 应压过而非垫小牌（也不能用 K）。
     func testPointDenialBeatsWithNonPointHighTrump() {
         let s = makeState()
         setTrick(s, lead: .south,
@@ -773,65 +1114,128 @@ final class AITacticalModeTests: XCTestCase {
         XCTAssertEqual(chosen.first?.rank, .three, "无分应保留♠A出♠3，chosen=\(chosen.map { $0.shortDisplay })")
     }
 
-    // P2 跟吊主：后手还有未知对手，0 分墩未锁定时，即使手里后续资产很强，
-    // 也不应为了抢出牌权把主10这类分牌裸送进去。
-    func testSecondHandTrumpPullDoesNotExposePointTrumpIntoUnknownTrick() {
-        let s = makeState()
-        setTrick(s, lead: .west,
-                 plays: [(.west, [c(.spades, .seven)])],
-                 turn: .north)
-        setHand(s, .north,
-                [c(.spades, .ten), c(.spades, .three),
-                 c(.hearts, .ace), c(.clubs, .ace), c(.diamonds, .ace),
-                 c(.hearts, .king), c(.clubs, .king), c(.diamonds, .king),
-                 c(.hearts, .queen), c(.clubs, .queen), c(.diamonds, .queen)])
+    func testTrumpLeadDoesNotExposePointTrumpForAnySeat() {
+        for position in PlayerPosition.allCases {
+            let s = makeState()
+            s.currentTrick = Trick(leadPosition: position)
+            s.currentLeader = position
+            s.currentTurn = position
+            setHand(s, position,
+                    [c(.spades, .king), c(.spades, .three), c(.spades, .four),
+                     c(.spades, .six), c(.spades, .seven), c(.spades, .eight),
+                     c(.spades, .nine), c(.hearts, .two)])
 
-        let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
-        XCTAssertEqual(chosen.count, 1)
-        XCTAssertEqual(chosen[0].pointValue, 0,
-                       "P2 吊主未知墩不应裸出主分牌，chosen=\(chosen.map { $0.shortDisplay })")
-        XCTAssertEqual(chosen[0].rank, .three,
-                       "应出可用的无分小主，chosen=\(chosen.map { $0.shortDisplay })")
+            let chosen = AIPlayer.chooseCards(position: position, state: s, evaluator: eval)
+            XCTAssertEqual(chosen.count, 1, position.seatName)
+            XCTAssertEqual(chosen[0].pointValue, 0,
+                           "\(position.seatName) 领吊主时不应裸出主分牌，chosen=\(chosen.map(\.shortDisplay))")
+        }
     }
 
-    // P2 跟吊主限制的是分牌暴露，不是主牌强度：
-    // 手里有大量待兑现资产时，可以用无分大主争本墩和下一手出牌权。
-    func testSecondHandTrumpPullCanUseNonPointControlTrumpForLeadControl() {
-        let s = makeState()
-        setTrick(s, lead: .west,
-                 plays: [(.west, [c(.spades, .seven)])],
-                 turn: .north)
-        setHand(s, .north,
-                [c(.spades, .ace), c(.spades, .three),
-                 c(.hearts, .ace), c(.clubs, .ace), c(.diamonds, .ace),
-                 c(.hearts, .king), c(.hearts, .king),
-                 c(.clubs, .queen), c(.clubs, .queen),
-                 c(.diamonds, .jack), c(.diamonds, .jack)])
+    func testTrumpPullAvoidsPointExposureWheneverUnknownOpponentRemains() {
+        let screenshotTrump: Suit? = .diamonds
+        let screenshotEval = TrickEvaluator(trumpSuit: screenshotTrump, trumpRank: tr)
 
-        let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
-        XCTAssertEqual(chosen.map { $0.shortDisplay }, ["♠A"],
-                       "P2 高主动权需求时应可用无分控制主抢出牌权，chosen=\(chosen.map { $0.shortDisplay })")
+        for leader in PlayerPosition.allCases {
+            for playsBeforeDecision in 1...2 {
+                let position = seat(after: leader, offset: playsBeforeDecision)
+                for pointRank in [Rank.ten, .king] {
+                    let s = makeState()
+                    s.trumpSuit = screenshotTrump
+                    s.completedTricks = pointExposureRegressionHistory(leader: leader)
+                    setTrick(
+                        s,
+                        lead: leader,
+                        plays: pointExposureRegressionPlays(
+                            leader: leader,
+                            playsBeforeDecision: playsBeforeDecision
+                        ),
+                        turn: position
+                    )
+                    let safeTrump = c(.diamonds, .four)
+                    let hand = pointExposureRegressionHand(pointRank: pointRank, safeTrump: safeTrump)
+                    setHand(s, position, hand)
+                    let caseName = "leader=\(leader.seatName), playsBefore=\(playsBeforeDecision), point=\(pointRank)"
+
+                    XCTAssertTrue(screenshotEval.isValidPlay(
+                        selected: [safeTrump], hand: hand, leadCards: s.currentTrick.leadCards!
+                    ), caseName)
+                    let chosen = AIPlayer.chooseCards(position: position, state: s, evaluator: screenshotEval)
+                    XCTAssertEqual(chosen.count, 1, caseName)
+                    XCTAssertEqual(chosen[0].pointValue, 0,
+                                   "\(caseName), chosen=\(chosen.map(\.shortDisplay))")
+                }
+            }
+        }
     }
 
-    // 同样有待兑现资产时，若大牌是主分牌且后手对手仍可能赢，仍应避免把分送入未知墩。
-    func testSecondHandTrumpPullStillAvoidsPointControlTrumpExposure() {
-        let s = makeState()
-        setTrick(s, lead: .west,
-                 plays: [(.west, [c(.spades, .seven)])],
-                 turn: .north)
-        setHand(s, .north,
-                [c(.spades, .king), c(.spades, .three),
-                 c(.hearts, .ace), c(.clubs, .ace), c(.diamonds, .ace),
-                 c(.hearts, .king), c(.hearts, .king),
-                 c(.clubs, .queen), c(.clubs, .queen),
-                 c(.diamonds, .jack), c(.diamonds, .jack)])
+    func testTrumpControlDependsOnWhetherTeammateStillActs() {
+        let screenshotTrump: Suit? = .diamonds
+        let screenshotEval = TrickEvaluator(trumpSuit: screenshotTrump, trumpRank: tr)
 
-        let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
-        XCTAssertEqual(chosen.map { $0.shortDisplay }, ["♠3"],
-                       "P2 即使需要主动权，也不应把主K送进后手对手可能赢的0分墩，chosen=\(chosen.map { $0.shortDisplay })")
+        for leader in PlayerPosition.allCases {
+            for playsBeforeDecision in 1...2 {
+                let position = seat(after: leader, offset: playsBeforeDecision)
+                let s = makeState()
+                s.trumpSuit = screenshotTrump
+                s.completedTricks = pointExposureRegressionHistory(leader: leader)
+                setTrick(
+                    s,
+                    lead: leader,
+                    plays: pointExposureRegressionPlays(
+                        leader: leader,
+                        playsBeforeDecision: playsBeforeDecision
+                    ),
+                    turn: position
+                )
+                setHand(s, position, controlTrumpRegressionHand())
+                let chosen = AIPlayer.chooseCards(position: position, state: s, evaluator: screenshotEval)
+                let caseName = "leader=\(leader.seatName), playsBefore=\(playsBeforeDecision)"
+
+                if playsBeforeDecision == 2 {
+                    XCTAssertEqual(chosen.map(\.shortDisplay), ["♦A"],
+                                   "本队已无后手时应用无分控制主阻分，\(caseName)")
+                } else {
+                    XCTAssertEqual(chosen.count, 1, caseName)
+                    XCTAssertEqual(chosen[0].pointValue, 0,
+                                   "后面还有队友时可保守或接管，但不得送分，\(caseName)")
+                }
+            }
+        }
     }
 
-    func testSecondHandKnownVoidOpponentUsesTrumpAceInsteadOfPointTrump() {
+    func testTrumpPullMustFollowPointTrumpWhenNoZeroPointAlternativeExists() {
+        let screenshotTrump: Suit? = .diamonds
+        let screenshotEval = TrickEvaluator(trumpSuit: screenshotTrump, trumpRank: tr)
+
+        for leader in PlayerPosition.allCases {
+            for playsBeforeDecision in 1...2 {
+                let position = seat(after: leader, offset: playsBeforeDecision)
+                for pointRank in [Rank.ten, .king] {
+                    let s = makeState()
+                    s.trumpSuit = screenshotTrump
+                    s.completedTricks = pointExposureRegressionHistory(leader: leader)
+                    setTrick(
+                        s,
+                        lead: leader,
+                        plays: pointExposureRegressionPlays(
+                            leader: leader,
+                            playsBeforeDecision: playsBeforeDecision
+                        ),
+                        turn: position
+                    )
+                    setHand(s, position, pointExposureRegressionHand(pointRank: pointRank, safeTrump: nil))
+
+                    let chosen = AIPlayer.chooseCards(position: position, state: s, evaluator: screenshotEval)
+                    XCTAssertEqual(chosen.count, 1)
+                    XCTAssertEqual(chosen[0].rank, pointRank,
+                                   "无 0 分主替代时必须跟出主分牌")
+                }
+            }
+        }
+    }
+
+    func testKnownVoidOpponentBehindUsesTrumpAceInsteadOfPointTrumpWhenTeammateStillActs() {
         let s = makeState()
         s.completedTricks = [playerVoidHeartsTrick(.north)]
         setTrick(s, lead: .south,
@@ -843,10 +1247,10 @@ final class AITacticalModeTests: XCTestCase {
 
         let chosen = AIPlayer.chooseCards(position: .west, state: s, evaluator: eval)
         XCTAssertEqual(chosen.map(\.shortDisplay), ["♠A"],
-                       "P2 后手对手也绝门时，应使用最小可赢的主A/级牌，不用主分或王，chosen=\(chosen.map(\.shortDisplay))")
+                       "后面还有队友且对手已知绝门时，应用最小可赢主A/级牌，chosen=\(chosen.map(\.shortDisplay))")
     }
 
-    func testThirdHandKnownVoidOpponentUsesLevelCard() {
+    func testKnownVoidOpponentBehindUsesLevelCardWhenTeamHasNoLaterActor() {
         let s = makeState()
         s.completedTricks = [playerVoidHeartsTrick(.east)]
         setTrick(s, lead: .south,
@@ -861,10 +1265,10 @@ final class AITacticalModeTests: XCTestCase {
 
         let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
         XCTAssertEqual(chosen.map(\.shortDisplay), ["♣2"],
-                       "P3 后手对手也绝门时，有级牌应使用级牌管分，不用主分或王，chosen=\(chosen.map(\.shortDisplay))")
+                       "本队已无后手且对手已知绝门时，应用级牌管分，chosen=\(chosen.map(\.shortDisplay))")
     }
 
-    func testSecondHandKnownVoidOpponentDiscardsZeroPointWhenTrumpsAreWeak() {
+    func testKnownVoidOpponentBehindDiscardsZeroPointWhenTeammateStillActsAndTrumpsAreWeak() {
         let s = makeState()
         s.completedTricks = [playerVoidHeartsTrick(.north)]
         setTrick(s, lead: .south,
@@ -874,10 +1278,10 @@ final class AITacticalModeTests: XCTestCase {
 
         let chosen = AIPlayer.chooseCards(position: .west, state: s, evaluator: eval)
         XCTAssertEqual(chosen.map(\.shortDisplay), ["♦3"],
-                       "P2 只有弱主/主分时应垫0分副牌，chosen=\(chosen.map(\.shortDisplay))")
+                       "后面还有队友且只有弱主/主分时应垫0分副牌，chosen=\(chosen.map(\.shortDisplay))")
     }
 
-    func testThirdHandKnownVoidOpponentDoesNotSpendJokersOnContest() {
+    func testKnownVoidOpponentBehindDoesNotSpendJokersWhenTeamHasNoLaterActor() {
         let s = makeState()
         s.completedTricks = [playerVoidHeartsTrick(.east)]
         setTrick(s, lead: .south,
@@ -892,7 +1296,7 @@ final class AITacticalModeTests: XCTestCase {
 
         let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
         XCTAssertEqual(chosen.map(\.shortDisplay), ["♦3"],
-                       "P3 该类竞争不应动大小王，应垫0分副牌，chosen=\(chosen.map(\.shortDisplay))")
+                       "本队已无后手时也不应动大小王作无效竞争，chosen=\(chosen.map(\.shortDisplay))")
     }
 
     // 开局主牌很多也不应直接领对王；拔主应先用低成本小主，保留最高控制对。

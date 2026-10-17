@@ -62,7 +62,7 @@ struct TrumpInfoBar: View {
         HStack(spacing: 16) {
             // 主牌
             HStack(spacing: 4) {
-                Text("主：")
+                Text(L10n.text("主："))
                     .font(.caption)
                     .foregroundColor(.white.opacity(0.7))
                 if let suit = trumpSuit {
@@ -86,7 +86,7 @@ struct TrumpInfoBar: View {
                 Image(systemName: "star.fill")
                     .font(.caption)
                     .foregroundColor(.yellow)
-                Text("攻方 \(attackScore) 分")
+                Text(L10n.format("game.attack_score_format", attackScore))
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.white)
             }

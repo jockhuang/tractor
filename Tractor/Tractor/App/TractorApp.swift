@@ -29,14 +29,24 @@ final class OrientationLockedAppDelegate: NSObject, UIApplicationDelegate {
 @main
 struct TractorApp: App {
     @UIApplicationDelegateAdaptor(OrientationLockedAppDelegate.self) private var appDelegate
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var engine = GameEngine()
+    @StateObject private var adsManager = AdsManager()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(engine)
+                .environmentObject(adsManager)
                 .onAppear {
                     OrientationLockedAppDelegate.requestPreferredLandscape()
+                }
+                .task {
+                    await adsManager.prepareForAds()
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    guard phase == .active else { return }
+                    Task { await adsManager.refreshAdFreeAccess() }
                 }
         }
     }

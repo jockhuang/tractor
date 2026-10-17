@@ -122,6 +122,9 @@ class GameState: ObservableObject {
     @Published var teamLevels: [Int: Rank] = [0: .two, 1: .two]
     @Published var dealerTeamIdx: Int = 0
 
+    /// Set only after a team wins while already playing its A round.
+    @Published var winningTeamIdx: Int? = nil
+
     /// 攻方胜后，下局指定庄家位置（顺时针轮转）
     var pendingDealerPosition: PlayerPosition? = nil
 
@@ -177,6 +180,7 @@ class GameState: ObservableObject {
         lastDrawnCardId   = nil
         postDealCountdown   = 0
         isResolvingTrick    = false
+        winningTeamIdx      = nil
         for p in players { p.hand = []; p.isDealer = false }
     }
 }

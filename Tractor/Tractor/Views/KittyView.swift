@@ -11,7 +11,7 @@ struct KittyInfoBar: View {
                 .font(.caption)
                 .foregroundColor(.yellow)
 
-            Text("选 8 张压底牌")
+            Text(L10n.text("选 8 张压底牌"))
                 .font(.system(size: 12))
                 .foregroundColor(.white.opacity(0.8))
 
@@ -24,7 +24,7 @@ struct KittyInfoBar: View {
             Button(action: onConfirm) {
                 HStack(spacing: 5) {
                     Image(systemName: "checkmark.circle.fill").font(.caption)
-                    Text("确认换底").font(.caption.bold())
+                    Text(L10n.text("确认换底")).font(.caption.bold())
                 }
                 .foregroundColor(.white)
                 .padding(.horizontal, 14)

@@ -1,6 +1,9 @@
 import SwiftUI
 
 struct RoundResultView: View {
+    @EnvironmentObject private var adsManager: AdsManager
+    @StateObject private var nativeAdModel = NativeAdModel()
+
     let result: RoundResult
     let teamLevels: [Int: Rank]
     let canStartNext: Bool
@@ -47,20 +50,24 @@ struct RoundResultView: View {
 
     private func resultContent(metrics: RoundResultMetrics) -> some View {
         VStack(spacing: metrics.contentSpacing) {
-            Text(result.attackTeamWon ? "🎉 攻方胜利" : "🏆 庄家方守住")
+            Text(L10n.text(result.attackTeamWon ? "round.attackers_win" : "round.dealers_hold"))
                 .font(metrics.titleFont)
                 .foregroundColor(result.attackTeamWon ? .yellow : .cyan)
+
+            if let nativeAd = nativeAdModel.nativeAd, adsManager.canRequestAds {
+                NativeAdPlacement(nativeAd: nativeAd)
+            }
 
             kittySection
 
             HStack(spacing: metrics.teamLevelSpacing) {
-                teamLevel(name: "南北", team: 0)
-                teamLevel(name: "东西", team: 1)
+                teamLevel(name: L10n.text("team.north_south"), team: 0)
+                teamLevel(name: L10n.text("team.east_west"), team: 1)
             }
 
             HStack(spacing: 20) {
                 Button(action: onQuit) {
-                    Text("退出")
+                    Text(L10n.text("退出"))
                         .font(.headline)
                         .foregroundColor(.white.opacity(0.8))
                         .padding(.horizontal, 28)
@@ -70,7 +77,7 @@ struct RoundResultView: View {
                 }
 
                 Button(action: onNext) {
-                    Text("下一局 →")
+                    Text(L10n.text("下一局 →"))
                         .font(.headline.bold())
                         .foregroundColor(canStartNext ? .white : .white.opacity(0.45))
                         .padding(.horizontal, 28)
@@ -81,26 +88,33 @@ struct RoundResultView: View {
                 .disabled(!canStartNext)
             }
         }
+        .task(id: adsManager.canRequestAds) {
+            nativeAdModel.updateAdEligibility(adsManager.canRequestAds)
+        }
     }
 
     @ViewBuilder
     private var kittySection: some View {
         VStack(spacing: 8) {
             HStack {
-                Text("底牌")
+                Text(L10n.text("底牌"))
                     .font(.subheadline.bold())
                     .foregroundColor(.white.opacity(0.8))
                 Spacer()
                 if result.rawKittyPoints > 0 && result.attackTeamWon {
-                    Text("×\(result.kittyMultiplier) → +\(result.rawKittyPoints * result.kittyMultiplier) 分")
+                    Text(L10n.format(
+                        "round.kitty_bonus_format",
+                        result.kittyMultiplier,
+                        result.rawKittyPoints * result.kittyMultiplier
+                    ))
                         .font(.caption.bold())
                         .foregroundColor(.yellow)
                 } else if result.attackTeamWon {
-                    Text("底牌无分")
+                    Text(L10n.text("底牌无分"))
                         .font(.caption)
                         .foregroundColor(.white.opacity(0.5))
                 } else {
-                    Text("庄家保底")
+                    Text(L10n.text("庄家保底"))
                         .font(.caption)
                         .foregroundColor(.white.opacity(0.5))
                 }
@@ -150,7 +164,7 @@ struct RoundResultView: View {
                 .font(.subheadline)
                 .foregroundColor(.white.opacity(0.7))
             Spacer()
-            Text("+\(steps) 级")
+            Text(L10n.format("round.levels_format", steps))
                 .font(.headline.bold())
                 .foregroundColor(.yellow)
         }

@@ -26,8 +26,8 @@ enum Rank: Int, CaseIterable, Codable, Comparable {
         case .queen:      return "Q"
         case .king:       return "K"
         case .ace:        return "A"
-        case .smallJoker: return "小王"
-        case .bigJoker:   return "大王"
+        case .smallJoker: return L10n.text("rank.small_joker.short")
+        case .bigJoker:   return L10n.text("rank.big_joker.short")
         default:          return "\(rawValue)"
         }
     }

@@ -86,7 +86,7 @@ struct AIHandView: View {
                     .clipShape(Capsule())
             }
             MiniCardBack(count: cardCount)
-            Text("\(position.displayName)  \(cardCount)张")
+            Text(L10n.format("player.cards_format", position.displayName, cardCount))
                 .font(.caption2)
                 .foregroundColor(.white.opacity(0.8))
         }

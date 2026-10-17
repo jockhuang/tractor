@@ -160,12 +160,12 @@ struct CardView: View, Equatable {
             Spacer()
 
             ZStack {
-                Text(isBig ? "大" : "小")
+                Text(L10n.text(isBig ? "joker.big_mark" : "joker.small_mark"))
                     .font(.system(size: isSmall ? 11 : 17, weight: .heavy, design: .rounded))
                     .offset(x: isSmall ? -5 : -8, y: isSmall ? -7 : -11)
                     .opacity(0.45)
 
-                Text("王")
+                Text(L10n.text("joker.name"))
                     .font(.system(size: isSmall ? 26 : 40, weight: .heavy, design: .rounded))
             }
             .frame(maxWidth: .infinity)
@@ -186,8 +186,8 @@ struct CardView: View, Equatable {
 
     private func jokerCornerLabel(isBig: Bool) -> some View {
         VStack(spacing: 0) {
-            Text(isBig ? "大" : "小")
-            Text("王")
+            Text(L10n.text(isBig ? "joker.big_mark" : "joker.small_mark"))
+            Text(L10n.text("joker.name"))
         }
         .font(.system(size: isSmall ? 9 : 12, weight: .heavy, design: .rounded))
         .lineLimit(1)

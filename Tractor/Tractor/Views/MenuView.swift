@@ -1,13 +1,17 @@
 import SwiftUI
+import StoreKit
 
 struct MenuView: View {
     @ObservedObject var engine: GameEngine
+    @EnvironmentObject private var adsManager: AdsManager
 
     @State private var showRules = false
     @State private var showLobby = false
+    @State private var showRemoveAds = false
     @State private var soundEnabled = SoundManager.shared.soundEnabled
     private var appVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "未知"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+            ?? L10n.text("menu.version_unknown")
     }
 
     var body: some View {
@@ -32,11 +36,11 @@ struct MenuView: View {
                 // 左侧：标题区
                 VStack(spacing: 10) {
                     Spacer()
-                    Text("升 级")
+                    Text(L10n.text("升 级"))
                         .font(.system(size: 52, weight: .heavy, design: .rounded))
                         .foregroundColor(.white)
                         .shadow(color: .black.opacity(0.4), radius: 8)
-                    Text("拖拉机 · 单机版")
+                    Text(L10n.text("拖拉机 · 单机版"))
                         .font(.headline)
                         .foregroundColor(.white.opacity(0.7))
                         .tracking(4)
@@ -50,7 +54,7 @@ struct MenuView: View {
                     Button(action: { engine.startNewGame() }) {
                         HStack {
                             Image(systemName: "play.fill")
-                            Text("开始游戏").font(.title3.bold())
+                            Text(L10n.text("开始游戏")).font(.title3.bold())
                         }
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
@@ -66,7 +70,7 @@ struct MenuView: View {
                     }
                     VStack(alignment: .leading, spacing: 3) {
                         Toggle(isOn: $engine.easyModeEnabled) {
-                            Label("欢乐模式", systemImage: "sparkles")
+                            Label(L10n.text("欢乐模式"), systemImage: "sparkles")
                                 .font(.headline)
                                 .foregroundColor(.white.opacity(0.9))
                         }
@@ -80,7 +84,7 @@ struct MenuView: View {
                     Button(action: { showLobby.toggle() }) {
                         HStack {
                             Image(systemName: "network")
-                            Text("局域网联机").font(.headline)
+                            Text(L10n.text("局域网联机")).font(.headline)
                         }
                         .foregroundColor(.white.opacity(0.9))
                         .frame(maxWidth: .infinity)
@@ -95,7 +99,7 @@ struct MenuView: View {
                     Button(action: { showRules.toggle() }) {
                         HStack {
                             Image(systemName: "book.fill")
-                            Text("游戏规则").font(.headline)
+                            Text(L10n.text("游戏规则")).font(.headline)
                         }
                         .foregroundColor(.white.opacity(0.85))
                         .frame(maxWidth: .infinity)
@@ -105,6 +109,30 @@ struct MenuView: View {
                         .overlay(
                             RoundedRectangle(cornerRadius: 14)
                                 .strokeBorder(Color.white.opacity(0.2), lineWidth: 1)
+                        )
+                    }
+
+                    Button(action: { showRemoveAds = true }) {
+                        HStack {
+                            Image(systemName: adsManager.hasActiveRemoveAdsSubscription
+                                ? "checkmark.shield.fill"
+                                : "nosign")
+                            Text(adsManager.hasActiveRemoveAdsSubscription
+                                ? L10n.text("ads.subscription_active")
+                                : removeAdsMenuTitle)
+                                .font(.headline)
+                        }
+                        .foregroundColor(adsManager.hasActiveRemoveAdsSubscription ? .green : .yellow)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background((adsManager.hasActiveRemoveAdsSubscription ? Color.green : .yellow).opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .strokeBorder(
+                                    (adsManager.hasActiveRemoveAdsSubscription ? Color.green : .yellow).opacity(0.3),
+                                    lineWidth: 1
+                                )
                         )
                     }
                     Spacer()
@@ -119,11 +147,29 @@ struct MenuView: View {
             VStack {
                 Spacer()
                 HStack {
-                    Text("版本 \(appVersion)  ·  南北 vs 东西")
+                    Text(L10n.format("menu.version_format", appVersion))
                         .font(.caption)
                         .foregroundColor(.white.opacity(0.4))
 
                     Spacer()
+
+                    if adsManager.isPrivacyOptionsRequired {
+                        Button {
+                            Task { await adsManager.presentPrivacyOptions() }
+                        } label: {
+                            Label(L10n.text("ads.privacy_choices"), systemImage: "hand.raised.fill")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Link(
+                        L10n.text("ads.privacy_policy"),
+                        destination: URL(string: "https://jock.kiwi/tractor-privacy-policy.html")!
+                    )
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.7))
 
                     // 音效开关
                     Button(action: {
@@ -134,7 +180,7 @@ struct MenuView: View {
                         HStack(spacing: 4) {
                             Image(systemName: soundEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
                                 .font(.system(size: 12))
-                            Text(soundEnabled ? "音效开" : "音效关")
+                            Text(L10n.text(soundEnabled ? "音效开" : "音效关"))
                                 .font(.caption)
                         }
                         .foregroundColor(soundEnabled ? .white.opacity(0.7) : .white.opacity(0.35))
@@ -154,6 +200,17 @@ struct MenuView: View {
         .sheet(isPresented: $showLobby) {
             LANLobbyView(engine: engine)
         }
+        .sheet(isPresented: $showRemoveAds) {
+            RemoveAdsSubscriptionView()
+        }
+    }
+
+    private var removeAdsMenuTitle: String {
+        guard let product = adsManager.removeAdsSubscriptionProduct,
+              let period = product.localizedSubscriptionPeriod else {
+            return L10n.text("ads.remove_ads")
+        }
+        return L10n.format("ads.remove_ads_price", product.displayPrice, period)
     }
 
     private var decorativeCards: some View {
@@ -181,6 +238,173 @@ struct MenuView: View {
     }
 }
 
+private struct RemoveAdsSubscriptionView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var adsManager: AdsManager
+    @State private var showManageSubscriptions = false
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 18) {
+                Image(systemName: adsManager.hasAdFreeAccess ? "checkmark.shield.fill" : "nosign")
+                    .font(.system(size: 52, weight: .semibold))
+                    .foregroundColor(adsManager.hasAdFreeAccess ? .green : .yellow)
+
+                Text(L10n.text(adsManager.hasAdFreeAccess ? "ads.removed" : "ads.remove_ads"))
+                    .font(.title2.bold())
+
+                Text(L10n.text("ads.remove_ads_description"))
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 420)
+
+                if adsManager.hasActiveRemoveAdsSubscription {
+                    Label(L10n.text("ads.purchase_active"), systemImage: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                        .font(.headline)
+
+                    Button(L10n.text("ads.manage_subscription")) {
+                        showManageSubscriptions = true
+                    }
+                    .buttonStyle(.bordered)
+                } else {
+                    purchaseControls
+                }
+
+                Text(L10n.text("ads.subscription_terms"))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 480)
+
+                HStack(spacing: 16) {
+                    Link(
+                        L10n.text("ads.privacy_policy"),
+                        destination: URL(
+                            string: "https://jock.kiwi/tractor-privacy-policy.html"
+                        )!
+                    )
+
+                    Link(
+                        L10n.text("ads.terms_of_use"),
+                        destination: URL(
+                            string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/"
+                        )!
+                    )
+                }
+                .font(.caption)
+
+                if let statusText {
+                    Text(statusText)
+                        .font(.footnote)
+                        .foregroundColor(statusIsError ? .red : .secondary)
+                        .multilineTextAlignment(.center)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(28)
+            .navigationTitle(L10n.text("ads.remove_ads"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(L10n.text("完成")) { dismiss() }
+                }
+            }
+            .task {
+                await adsManager.loadRemoveAdsProductIfNeeded()
+            }
+            .manageSubscriptionsSheet(isPresented: $showManageSubscriptions)
+        }
+    }
+
+    @ViewBuilder
+    private var purchaseControls: some View {
+        if let product = adsManager.removeAdsSubscriptionProduct,
+           let period = product.localizedSubscriptionPeriod {
+            Button {
+                Task { await adsManager.subscribeToRemoveAds() }
+            } label: {
+                Text(L10n.format("ads.buy_for_price", product.displayPrice, period))
+                    .font(.headline)
+                    .frame(maxWidth: 320)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(adsManager.isRemoveAdsStoreBusy)
+        } else if adsManager.removeAdsStoreStatus == .loadingProduct {
+            ProgressView(L10n.text("ads.loading_product"))
+        } else {
+            Button(L10n.text("ads.retry")) {
+                Task { await adsManager.loadRemoveAdsProductIfNeeded(forceReload: true) }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(adsManager.isRemoveAdsStoreBusy)
+        }
+
+        Button(L10n.text("ads.restore_purchases")) {
+            Task { await adsManager.restoreRemoveAdsSubscription() }
+        }
+        .buttonStyle(.bordered)
+        .disabled(adsManager.isRemoveAdsStoreBusy)
+    }
+
+    private var statusIsError: Bool {
+        adsManager.removeAdsStoreStatus == .failed ||
+            adsManager.removeAdsStoreStatus == .unavailable
+    }
+
+    private var statusText: String? {
+        switch adsManager.removeAdsStoreStatus {
+        case .idle, .ready:
+            return nil
+        case .loadingProduct:
+            return L10n.text("ads.loading_product")
+        case .purchasing:
+            return L10n.text("ads.purchasing")
+        case .pending:
+            return L10n.text("ads.purchase_pending")
+        case .purchased:
+            return L10n.text("ads.purchase_success")
+        case .restoring:
+            return L10n.text("ads.restoring")
+        case .restored:
+            return L10n.text("ads.restore_success")
+        case .nothingToRestore:
+            return L10n.text("ads.nothing_to_restore")
+        case .unavailable:
+            return L10n.text("ads.product_unavailable")
+        case .failed:
+            return adsManager.removeAdsStoreError ?? L10n.text("ads.purchase_failed")
+        }
+    }
+}
+
+private extension Product {
+    var localizedSubscriptionPeriod: String? {
+        guard let period = subscription?.subscriptionPeriod else { return nil }
+
+        var components = DateComponents()
+        switch period.unit {
+        case .day:
+            components.day = period.value
+        case .week:
+            components.weekOfMonth = period.value
+        case .month:
+            components.month = period.value
+        case .year:
+            components.year = period.value
+        @unknown default:
+            return nil
+        }
+
+        let formatter = DateComponentsFormatter()
+        formatter.unitsStyle = .full
+        formatter.maximumUnitCount = 1
+        return formatter.string(from: components)
+    }
+}
+
 struct LANLobbyView: View {
     @ObservedObject var engine: GameEngine
     @ObservedObject private var multiplayer: LANMultiplayerManager
@@ -195,16 +419,16 @@ struct LANLobbyView: View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("联机名字")
+                    Text(L10n.text("联机名字"))
                         .font(.headline)
-                    TextField("输入你的名字", text: $multiplayer.localPlayerName)
+                    TextField(L10n.text("输入你的名字"), text: $multiplayer.localPlayerName)
                         .textFieldStyle(.roundedBorder)
                         .disabled(multiplayer.mode != .none)
                         .onSubmit {
                             multiplayer.commitLocalPlayerName()
                         }
                     if multiplayer.mode != .none {
-                        Text("断开当前房间后可修改名字。")
+                        Text(L10n.text("断开当前房间后可修改名字。"))
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -212,13 +436,13 @@ struct LANLobbyView: View {
 
                 HStack(spacing: 12) {
                     Button(action: { multiplayer.hostGame() }) {
-                        Label("发起房间", systemImage: "antenna.radiowaves.left.and.right")
+                        Label(L10n.text("发起房间"), systemImage: "antenna.radiowaves.left.and.right")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
 
                     Button(action: { multiplayer.browseGames() }) {
-                        Label("搜索加入", systemImage: "magnifyingglass")
+                        Label(L10n.text("搜索加入"), systemImage: "magnifyingglass")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
@@ -231,14 +455,14 @@ struct LANLobbyView: View {
                 }
 
                 if multiplayer.isClient && !multiplayer.discoveredHosts.isEmpty {
-                    SectionHeader("可加入房间")
+                    SectionHeader(L10n.text("可加入房间"))
                     ForEach(Array(multiplayer.discoveredHosts.enumerated()), id: \.offset) { _, host in
                         Button(action: { multiplayer.join(host) }) {
                             HStack {
                                 Image(systemName: "iphone.gen3")
                                 Text(host.displayName)
                                 Spacer()
-                                Text("加入")
+                                Text(L10n.text("加入"))
                                     .font(.caption.bold())
                             }
                         }
@@ -246,9 +470,9 @@ struct LANLobbyView: View {
                     }
                 }
 
-                SectionHeader("当前房间")
+                SectionHeader(L10n.text("当前房间"))
                 if multiplayer.lobby.players.isEmpty {
-                    Text("还没有房间。发起房间或搜索附近房主。")
+                    Text(L10n.text("还没有房间。发起房间或搜索附近房主。"))
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 } else {
@@ -258,7 +482,7 @@ struct LANLobbyView: View {
                                 .foregroundColor(player.isHost ? .yellow : .blue)
                             Text(player.name)
                             Spacer()
-                            Text(player.position?.seatName ?? "待分配")
+                            Text(player.position?.seatName ?? L10n.text("待分配"))
                                 .font(.caption.bold())
                                 .foregroundColor(.secondary)
                         }
@@ -273,26 +497,26 @@ struct LANLobbyView: View {
                         multiplayer.startHostedGame()
                         dismiss()
                     }) {
-                        Label("随机分组并开始", systemImage: "shuffle")
+                        Label(L10n.text("随机分组并开始"), systemImage: "shuffle")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                 } else if multiplayer.isClient {
-                    Text("等待房主开始。未满 4 人时，空位会由 AI 接管。")
+                    Text(L10n.text("等待房主开始。未满 4 人时，空位会由 AI 接管。"))
                         .font(.footnote)
                         .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
             }
             .padding(20)
-            .navigationTitle("局域网联机")
+            .navigationTitle(L10n.text("局域网联机"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("关闭") { dismiss() }
+                    Button(L10n.text("关闭")) { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("断开") { multiplayer.leave() }
+                    Button(L10n.text("断开")) { multiplayer.leave() }
                 }
             }
             .onChange(of: multiplayer.mode) { _, mode in
@@ -326,40 +550,19 @@ struct RulesView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    ruleSection(title: "基本规则", content: """
-• 4人游戏：南北 vs 东西，两两一队
-• 使用两副完整扑克牌（108张），含大小王
-• 庄家方持有当前"级"（从2开始，逐步升到A）
-""")
-                    ruleSection(title: "主牌体系", content: """
-• 庄家方亮出"主花色"
-• 主牌由高到低：大王 > 小王 > 主花色级牌 > 其他花色级牌 > 主花色其他牌
-• 级牌无论什么花色都是主牌
-""")
-                    ruleSection(title: "出牌", content: """
-• 先手可以出单张、对子、连对（拖拉机）
-• 跟牌必须跟同花色，不够时可以补其他牌
-• 非主牌不能压主，主牌可以压任意非主
-""")
-                    ruleSection(title: "计分", content: """
-• 5 = 5分，10 = 10分，K = 10分
-• 攻方（非庄家方）累计 ≥ 80分则赢得本局
-• 最后一墩赢家拿底牌分 ×2
-""")
-                    ruleSection(title: "升级", content: """
-• 庄家方赢：根据攻方得分，庄家方升 1~3 级
-• 攻方赢：攻方成为下一局庄家
-• 超过120分升1级，超过160分升2级
-• 率先升到 A 且赢得一局者获胜
-""")
+                    ruleSection(title: L10n.text("基本规则"), content: L10n.text("rules.basic.body"))
+                    ruleSection(title: L10n.text("主牌体系"), content: L10n.text("rules.trump.body"))
+                    ruleSection(title: L10n.text("出牌"), content: L10n.text("rules.play.body"))
+                    ruleSection(title: L10n.text("计分"), content: L10n.text("rules.scoring.body"))
+                    ruleSection(title: L10n.text("升级"), content: L10n.text("rules.level.body"))
                 }
                 .padding(20)
             }
-            .navigationTitle("游戏规则")
+            .navigationTitle(L10n.text("游戏规则"))
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { dismiss() }
+                    Button(L10n.text("完成")) { dismiss() }
                 }
             }
         }

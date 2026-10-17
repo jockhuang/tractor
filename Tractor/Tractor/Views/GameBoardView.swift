@@ -32,9 +32,13 @@ struct GameBoardView: View {
     }
     private var playButtonTitle: String {
         if let required = requiredPlayCardCount {
-            return "出牌 (\(state.selectedCards.count)/\(required)张)"
+            return L10n.format(
+                "game.play_button_required_format",
+                state.selectedCards.count,
+                required
+            )
         }
-        return "出牌 (\(state.selectedCards.count)张)"
+        return L10n.format("game.play_button_format", state.selectedCards.count)
     }
 
     var body: some View {
@@ -91,6 +95,7 @@ struct GameBoardView: View {
             if state.phase == .gameOver {
                 GameOverView(
                     teamLevels: state.teamLevels,
+                    winnerTeam: state.winningTeamIdx,
                     localTeam: engine.localPlayer.team,
                     onRestart: engine.startNewGame,
                     onQuit: quitToMenu
@@ -176,7 +181,11 @@ struct GameBoardView: View {
                 if state.dealerPosition == position {
                     Text("👑").font(.system(size: 11))
                 }
-                Text("\(displayName(for: position))  \(state.player(position).hand.count)张")
+                Text(L10n.format(
+                    "player.cards_format",
+                    displayName(for: position),
+                    state.player(position).hand.count
+                ))
                     .font(.caption2)
                     .foregroundColor(.white.opacity(0.8))
                     .lineLimit(1)
@@ -237,7 +246,7 @@ struct GameBoardView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
-            Text("\(count)张")
+            Text(L10n.format("cards.count_format", count))
                 .font(.system(size: 10))
                 .foregroundColor(.white.opacity(0.6))
             Spacer()
@@ -261,7 +270,7 @@ struct GameBoardView: View {
                 layoutScale: metrics.trickAreaScale
             )
             if state.currentTurn == localPosition && state.phase == .playing {
-                Text("轮到你出牌")
+                Text(L10n.text("轮到你出牌"))
                     .font(.caption.bold())
                     .foregroundColor(.yellow)
                     .padding(.horizontal, 10)
@@ -362,7 +371,7 @@ struct GameBoardView: View {
 
     private func teamBadge(team: Int) -> some View {
         let color: Color = team == 0 ? .blue : .orange
-        let label = team == state.dealerTeamIdx ? "庄" : "攻"
+        let label = L10n.text(team == state.dealerTeamIdx ? "team.dealer_badge" : "team.attack_badge")
         return Text(label)
             .font(.caption2.bold())
             .foregroundColor(.white)
@@ -375,7 +384,7 @@ struct GameBoardView: View {
     private var localPlayerLabel: String {
         let name = displayName(for: localPosition)
         if engine.multiplayer.mode != .none || !state.playerNames.isEmpty {
-            return "\(name)（\(localPosition.seatName)）"
+            return L10n.format("player.name_seat_format", name, localPosition.seatName)
         }
         return name
     }
@@ -441,7 +450,7 @@ private struct GameStatusBar: View {
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
             HStack(spacing: 4) {
-                Text("主")
+                Text(L10n.text("主"))
                     .font(.system(size: 10))
                     .foregroundColor(.white.opacity(0.6))
                 if let trumpSuit {
@@ -468,7 +477,7 @@ private struct GameStatusBar: View {
                 Image(systemName: "star.fill")
                     .font(.system(size: 9))
                     .foregroundColor(.yellow)
-                Text("攻 \(attackScore)分")
+                Text(L10n.format("game.attack_score_compact_format", attackScore))
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.white)
             }
@@ -482,7 +491,7 @@ private struct GameStatusBar: View {
                     HStack(spacing: 3) {
                         Image(systemName: "clock.arrow.circlepath")
                             .font(.system(size: 10))
-                        Text("记录")
+                        Text(L10n.text("记录"))
                             .font(.system(size: 11, weight: .medium))
                     }
                     .foregroundColor(.white)
@@ -506,7 +515,7 @@ private struct GameStatusBar: View {
                 HStack(spacing: 3) {
                     Image(systemName: "rectangle.portrait.and.arrow.right")
                         .font(.system(size: 10))
-                    Text("退出")
+                    Text(L10n.text("退出"))
                         .font(.system(size: 11, weight: .medium))
                 }
                 .foregroundColor(.white)
@@ -515,7 +524,7 @@ private struct GameStatusBar: View {
                 .background(Color.red.opacity(0.7))
                 .clipShape(Capsule())
             }
-            .accessibilityLabel("退出当前游戏并返回开始界面")
+            .accessibilityLabel(Text(L10n.text("退出当前游戏并返回开始界面")))
         }
     }
 }
@@ -573,63 +582,80 @@ private struct GameBoardMetrics {
 
 // MARK: - Game Over
 struct GameOverView: View {
+    @EnvironmentObject private var adsManager: AdsManager
+    @StateObject private var nativeAdModel = NativeAdModel()
+
     let teamLevels: [Int: Rank]
+    let winnerTeam: Int?
     let localTeam: Int
     let onRestart: () -> Void
     let onQuit: () -> Void
 
-    private var winnerTeam: Int {
+    private var resolvedWinnerTeam: Int {
+        if let winnerTeam { return winnerTeam }
         let southNorth = teamLevels[0]?.rawValue ?? 0
         let eastWest   = teamLevels[1]?.rawValue ?? 0
         return southNorth >= eastWest ? 0 : 1
     }
 
     private var winner: String {
-        winnerTeam == 0 ? "南北队" : "东西队"
+        L10n.text(resolvedWinnerTeam == 0 ? "team.north_south_full" : "team.east_west_full")
     }
 
     var body: some View {
         ZStack {
             Color.black.opacity(0.7).ignoresSafeArea()
 
-            HStack(spacing: 40) {
-                VStack(spacing: 16) {
-                    Text(winnerTeam == localTeam ? "🎊" : "😔")
-                        .font(.system(size: 48))
-                    Text("\(winner) 获胜！")
-                        .font(.title2.bold())
-                        .foregroundColor(.yellow)
+            VStack(spacing: 18) {
+                HStack(spacing: 40) {
+                    VStack(spacing: 16) {
+                        Text(resolvedWinnerTeam == localTeam ? "🎊" : "😔")
+                            .font(.system(size: 48))
+                        Text(L10n.format("game.winner_format", winner))
+                            .font(.title2.bold())
+                            .foregroundColor(.yellow)
+                    }
+
+                    HStack(spacing: 24) {
+                        levelDisplay(name: L10n.text("team.north_south"), team: 0)
+                        levelDisplay(name: L10n.text("team.east_west"), team: 1)
+                    }
+
+                    VStack(spacing: 12) {
+                        Button(action: onQuit) {
+                            Text(L10n.text("主菜单"))
+                                .font(.headline)
+                                .foregroundColor(.white.opacity(0.85))
+                                .padding(.horizontal, 24)
+                                .padding(.vertical, 10)
+                                .background(Color.white.opacity(0.15))
+                                .clipShape(Capsule())
+                        }
+                        Button(action: onRestart) {
+                            Text(L10n.text("再来一局 ↺"))
+                                .font(.headline.bold())
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 24)
+                                .padding(.vertical, 10)
+                                .background(Color.blue)
+                                .clipShape(Capsule())
+                        }
+                    }
                 }
 
-                HStack(spacing: 24) {
-                    levelDisplay(name: "南北", team: 0)
-                    levelDisplay(name: "东西", team: 1)
-                }
-
-                VStack(spacing: 12) {
-                    Button(action: onQuit) {
-                        Text("主菜单")
-                            .font(.headline)
-                            .foregroundColor(.white.opacity(0.85))
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 10)
-                            .background(Color.white.opacity(0.15))
-                            .clipShape(Capsule())
-                    }
-                    Button(action: onRestart) {
-                        Text("再来一局 ↺")
-                            .font(.headline.bold())
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 10)
-                            .background(Color.blue)
-                            .clipShape(Capsule())
-                    }
+                if let nativeAd = nativeAdModel.nativeAd, adsManager.canRequestAds {
+                    NativeAdPlacement(nativeAd: nativeAd)
+                        .frame(maxWidth: .infinity)
                 }
             }
-            .padding(28)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 18)
+            .frame(maxWidth: 720)
             .background(Color(red: 0.1, green: 0.12, blue: 0.28))
             .clipShape(RoundedRectangle(cornerRadius: 20))
+        }
+        .task(id: adsManager.canRequestAds) {
+            nativeAdModel.updateAdEligibility(adsManager.canRequestAds)
         }
     }
 

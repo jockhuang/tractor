@@ -28,8 +28,15 @@
 		AABB02000000000000000006 /* AIPlayer+Scoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABB02000000000000000005 /* AIPlayer+Scoring.swift */; };
 		AABB02000000000000000008 /* AIPlayer+MonteCarlo.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABB02000000000000000007 /* AIPlayer+MonteCarlo.swift */; };
 		AABB0200000000000000000A /* AIPlayer+Debug.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABB02000000000000000009 /* AIPlayer+Debug.swift */; };
+		ABCD10000000000000000001 /* Localization.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABCD10000000000000000004 /* Localization.swift */; };
+		ABCD10000000000000000002 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = ABCD10000000000000000009 /* Localizable.strings */; };
+		ABCD10000000000000000003 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = ABCD1000000000000000000A /* InfoPlist.strings */; };
 		B176C172D8FA58B1E823618B /* CardComparator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D50307D2A5F27D4B1F40B72B /* CardComparator.swift */; };
 		B95FF48B976B4685DF6ED2F6 /* DealingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCE6FDA953C788095A46F543 /* DealingView.swift */; };
+		BADC0DE00000000000000001 /* AdsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BADC0DE00000000000000011 /* AdsManager.swift */; };
+		BADC0DE00000000000000002 /* RoundResultNativeAdView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BADC0DE00000000000000012 /* RoundResultNativeAdView.swift */; };
+		BADC0DE00000000000000003 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = BADC0DE00000000000000022 /* GoogleMobileAds */; };
+		BADC0DE00000000000000004 /* AdFreeSubscription.storekit in Resources */ = {isa = PBXBuildFile; fileRef = BADC0DE00000000000000013 /* AdFreeSubscription.storekit */; };
 		BE654BC016F1765126FE895C /* Deck.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97949698EDBA15361ED3EF3D /* Deck.swift */; };
 		CC11223344556677889900DD /* poker_card_draw_sound.wav in Resources */ = {isa = PBXBuildFile; fileRef = CC11223344556677889900CC /* poker_card_draw_sound.wav */; };
 		E0E6F7B44929E5AAB955F6DD /* PlayerHandView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB1E689C7FBD979E299D6C33 /* PlayerHandView.swift */; };
@@ -77,7 +84,17 @@
 		AABB02000000000000000007 /* AIPlayer+MonteCarlo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIPlayer+MonteCarlo.swift"; sourceTree = "<group>"; };
 		AABB02000000000000000009 /* AIPlayer+Debug.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIPlayer+Debug.swift"; sourceTree = "<group>"; };
 		AB1E689C7FBD979E299D6C33 /* PlayerHandView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerHandView.swift; sourceTree = "<group>"; };
+		ABCD10000000000000000004 /* Localization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Localization.swift; sourceTree = "<group>"; };
+		ABCD10000000000000000005 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		ABCD10000000000000000006 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/Localizable.strings"; sourceTree = "<group>"; };
+		ABCD10000000000000000007 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
+		ABCD10000000000000000008 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+		ABCD1000000000000000000B /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
+		ABCD1000000000000000000C /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
 		B2C3D4E5F6A7B8C9D0E1F2A3 /* TrickHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrickHistoryView.swift; sourceTree = "<group>"; };
+		BADC0DE00000000000000011 /* AdsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdsManager.swift; sourceTree = "<group>"; };
+		BADC0DE00000000000000012 /* RoundResultNativeAdView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoundResultNativeAdView.swift; sourceTree = "<group>"; };
+		BADC0DE00000000000000013 /* AdFreeSubscription.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = AdFreeSubscription.storekit; sourceTree = "<group>"; };
 		BCE6FDA953C788095A46F543 /* DealingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DealingView.swift; sourceTree = "<group>"; };
 		C09DB23798084A0467D64803 /* CardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardView.swift; sourceTree = "<group>"; };
 		C98CB540074BC5E848216557 /* GameBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameBoardView.swift; sourceTree = "<group>"; };
@@ -94,6 +111,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BADC0DE00000000000000003 /* GoogleMobileAds in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +130,8 @@
 			children = (
 				95D202B73DE64F6C7959E5A6 /* TractorApp.swift */,
 				152D3A87DFF7600785C9B431 /* ContentView.swift */,
+				ABCD10000000000000000004 /* Localization.swift */,
+				BADC0DE00000000000000011 /* AdsManager.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -133,6 +153,7 @@
 				1895631AC0027FE299A34C21 /* TrickAreaView.swift */,
 				48E5EE73804B88FAEFDA2869 /* KittyView.swift */,
 				8E6A21A7043996B65A64A6AE /* RoundResultView.swift */,
+				BADC0DE00000000000000012 /* RoundResultNativeAdView.swift */,
 				0F3D41A45212AAAC70FAB15C /* MenuView.swift */,
 				C98CB540074BC5E848216557 /* GameBoardView.swift */,
 				BCE6FDA953C788095A46F543 /* DealingView.swift */,
@@ -194,8 +215,11 @@
 				CA608C0B22E7B6F9B389BDDD /* Models */,
 				C2B2C90D486CB339AA37D21B /* Engine */,
 				78EF4B0EA3FDA2A792BCF074 /* Views */,
+				ABCD10000000000000000009 /* Localizable.strings */,
+				ABCD1000000000000000000A /* InfoPlist.strings */,
 				671E5B54412D9F8033A8454C /* Assets.xcassets */,
 				0A929019CD960CE95E5D54A9 /* Info.plist */,
+				BADC0DE00000000000000013 /* AdFreeSubscription.storekit */,
 				CC11223344556677889900CC /* poker_card_draw_sound.wav */,
 				EE11223344556677889900EE /* card_slap_on_table.wav */,
 				1111223344556677889900BB /* game_victory_sound.wav */,
@@ -213,6 +237,7 @@
 			buildPhases = (
 				AABB01000000000000000005 /* Sources */,
 				AABB01000000000000000006 /* Frameworks */,
+				BADC0DE00000000000000014 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -237,6 +262,9 @@
 			dependencies = (
 			);
 			name = Tractor;
+			packageProductDependencies = (
+				BADC0DE00000000000000022 /* GoogleMobileAds */,
+			);
 			productName = Tractor;
 			productReference = A97C29AD63741CF438998CE6 /* Tractor Game.app */;
 			productType = "com.apple.product-type.application";
@@ -257,19 +285,28 @@
 					};
 					E92819776D1D900150F17949 = {
 						CreatedOnToolsVersion = 15.3;
+						SystemCapabilities = {
+							com.apple.InAppPurchase = {
+								enabled = 1;
+							};
+						};
 					};
 				};
 			};
 			buildConfigurationList = B2BE817334BDE0D051010E74 /* Build configuration list for PBXProject "Tractor" */;
 			compatibilityVersion = "Xcode 14.0";
-			developmentRegion = zh_CN;
+			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
 				Base,
-				zh_CN,
+				"zh-Hans",
+				"zh-Hant",
 			);
 			mainGroup = 7882D14E196057770B59E53D;
+			packageReferences = (
+				BADC0DE00000000000000021 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */,
+			);
 			productRefGroup = BF7A2D27A78D590BDEF15AF2 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -285,11 +322,21 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				ABCD10000000000000000002 /* Localizable.strings in Resources */,
+				ABCD10000000000000000003 /* InfoPlist.strings in Resources */,
 				F7B235559E4A7603B1BBD6F2 /* Assets.xcassets in Resources */,
 				CC11223344556677889900DD /* poker_card_draw_sound.wav in Resources */,
 				EE11223344556677889900FF /* card_slap_on_table.wav in Resources */,
 				1111223344556677889900AA /* game_victory_sound.wav in Resources */,
 				2222334455667788990011CC /* game_over_sound.wav in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BADC0DE00000000000000014 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BADC0DE00000000000000004 /* AdFreeSubscription.storekit in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -308,6 +355,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BADC0DE00000000000000001 /* AdsManager.swift in Sources */,
+				BADC0DE00000000000000002 /* RoundResultNativeAdView.swift in Sources */,
+				ABCD10000000000000000001 /* Localization.swift in Sources */,
 				8FE9E5F3FF2FB847882F37B2 /* TractorApp.swift in Sources */,
 				7F4BB21E8B4B2CE059FAD509 /* ContentView.swift in Sources */,
 				F7A77112F7889361098812F4 /* Card.swift in Sources */,
@@ -347,6 +397,29 @@
 		};
 /* End PBXTargetDependency section */
 
+/* Begin PBXVariantGroup section */
+		ABCD10000000000000000009 /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				ABCD10000000000000000005 /* en */,
+				ABCD1000000000000000000B /* zh-Hans */,
+				ABCD10000000000000000006 /* zh-Hant */,
+			);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+		ABCD1000000000000000000A /* InfoPlist.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				ABCD10000000000000000007 /* en */,
+				ABCD1000000000000000000C /* zh-Hans */,
+				ABCD10000000000000000008 /* zh-Hant */,
+			);
+			name = InfoPlist.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
 /* Begin XCBuildConfiguration section */
 		4DC7B479A29173674AFD7BAC /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -354,11 +427,11 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 30001;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Tractor/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17;
-				MARKETING_VERSION = 2.1;
+				MARKETING_VERSION = 3.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jock.game.tractor;
 				PRODUCT_NAME = "Tractor Game";
 				SDKROOT = iphoneos;
@@ -378,11 +451,11 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 30001;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Tractor/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17;
-				MARKETING_VERSION = 2.1;
+				MARKETING_VERSION = 3.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jock.game.tractor;
 				PRODUCT_NAME = "Tractor Game";
 				SDKROOT = iphoneos;
@@ -573,6 +646,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		BADC0DE00000000000000021 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googleads/swift-package-manager-google-mobile-ads.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 13.11.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		BADC0DE00000000000000022 /* GoogleMobileAds */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BADC0DE00000000000000021 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
+			productName = GoogleMobileAds;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
 }

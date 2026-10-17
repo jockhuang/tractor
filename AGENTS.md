@@ -249,7 +249,7 @@ AI 已不再走单一固定优先级表。无论先手还是跟牌，都走同�
 
 1. 规则基线（`followCardsRuleBased`）+ 非主/结构候选（`generateFollowCandidates`）+ 统一主牌控墩候选（`generateTrumpControlCandidates`）。
 2. 仅保留合法走法（`isValidPlay`），再过三道滤网：
-   - `filterUnsafeSecondHandTrumpPointExposure`：P2 跟吊主、当前 0 分墩、后手仍有未知对手且本墩未锁定时，若存在合法 0 分替代牌，剔除裸出主分牌的候选，避免为了抢出牌权把 10/K/5 送进未知墩。
+   - `filterUnsafeTrumpPointExposureBeforeUnknownOpponent`：跟吊主时，当前 0 分墩、后手仍有未知对手且本墩未锁定时，若存在合法 0 分替代牌，剔除裸出主分牌的候选，避免为了抢出牌权把 10/K/5 送进未知墩。是否用无分控制主接管，还要根据后面是否有队友、自己是否已是本队最后行动者判断。
    - `filterTrumpControlMoves`：所有花主牌的候选统一用 Trump Control Decision 分类；高分墩或高主动权需求时，若存在锁定/争墩主牌，会剔除被动主牌。
    - `filterHighInitiativeWinningMoves`：当急需主动权（`initiativeNeed` ≥ 100）时，若存在「便宜、不拆对子、不动大主」的取胜走法则只保留它们；主牌走法还必须在 Trump Control 下不是被动且得分为正。
 3. 用 `scoreFollow` 打分，取前 5 名，再由蒙特卡洛择优。
@@ -450,7 +450,7 @@ startNewGame()
 | 修改 AI 甩牌领出条件 | `AIPlayer.findSlamLead` / `isEffectivelyBiggestSingle` / `isEffectivelyBiggestPair` |
 | 修改 AI 跟牌策略 | `AIPlayer.followCards`（候选）/ `scoreFollow`（权重）/ `followTractor` / `followPair` |
 | 调整 AI 跟牌打分权重 | `AIPlayer.scoreFollow`；花主牌走法优先调 `trumpControlDecision` / `trumpControlCost` / `trumpCostDamping` |
-| 修改 P2 跟吊主 0 分未知墩裸出分牌过滤 | `AIPlayer.filterUnsafeSecondHandTrumpPointExposure` |
+| 修改跟吊主时「后手有未知对手」的 0 分墩裸出分牌过滤 | `AIPlayer.filterUnsafeTrumpPointExposureBeforeUnknownOpponent` |
 | 修改 AI 主牌控墩逻辑（吊主、将吃、盖吃、保队友、抢主动权） | `AIPlayer.generateTrumpControlCandidates` / `filterTrumpControlMoves` / `trumpControlDecision` / `bestTrumpControlFill` / `isSecureWinningTrumpFollow` |
 | 修改 AI 绝花色后填牌逻辑（将吃 / 垫分） | `AIPlayer.voidFillCards` / `bestTrumpControlFill`（`partnerAtRisk` / `enemySubsequentVoidInLead` 只影响回退路径）|
 | 修改 AI 安全出主逻辑 | `AIPlayer.isSafeTrumpFiller` / `isSafeTrump` |

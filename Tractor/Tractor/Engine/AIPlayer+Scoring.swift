@@ -611,21 +611,20 @@ extension AIPlayer {
     }
 
 
-    static func isSecondHandTrumpPull(
+    static func isTrumpPullWithUnknownOpponentBehind(
         leadCards: [Card],
         position: PlayerPosition,
         state: GameState,
         evaluator: TrickEvaluator,
         ctx: AIContext
     ) -> Bool {
-        guard evaluator.dominantSuit(of: leadCards) == nil,
-              state.currentTrick.plays.count == 1 else { return false }
+        guard evaluator.dominantSuit(of: leadCards) == nil else { return false }
         return unplayedSubsequentPositions(after: position, in: state)
             .contains { $0.team != position.team && !ctx.isVoid($0, key: "TRUMP") }
     }
 
 
-    /// P2 跟吊主时的出牌权需求。这里度量的是"赢下本墩后是否有东西可兑现"，
+    /// 跟吊主且后手仍有未知对手时的出牌权需求。这里度量的是"赢下本墩后是否有东西可兑现"，
     /// 不是主牌强度本身：副牌 A、已知最大副牌、安全甩牌、强结构、长套和待兑现分牌都会提高需求。
     static func leadControlNeed(
         position: PlayerPosition,
@@ -688,7 +687,7 @@ extension AIPlayer {
     }
 
 
-    static func secondHandTrumpWinConfidence(
+    static func trumpPullWinConfidence(
         _ move: AIMove,
         hand: [Card],
         position: PlayerPosition,
@@ -724,7 +723,7 @@ extension AIPlayer {
     }
 
 
-    static func secondHandTrumpPointExposureRisk(
+    static func trumpPullPointExposureRisk(
         _ move: AIMove,
         hand: [Card],
         position: PlayerPosition,
@@ -740,7 +739,7 @@ extension AIPlayer {
     }
 
 
-    static func secondHandTrumpControlAdjustment(
+    static func trumpPullControlAdjustment(
         _ move: AIMove,
         leadCards: [Card],
         hand: [Card],
@@ -750,7 +749,7 @@ extension AIPlayer {
         ctx: AIContext,
         cost: Double
     ) -> Double {
-        guard isSecondHandTrumpPull(
+        guard isTrumpPullWithUnknownOpponentBehind(
             leadCards: leadCards,
             position: position,
             state: state,
@@ -759,7 +758,7 @@ extension AIPlayer {
         ) else { return 0 }
 
         let playedPoints = move.cards.reduce(0) { $0 + $1.pointValue }
-        let exposureRisk = secondHandTrumpPointExposureRisk(
+        let exposureRisk = trumpPullPointExposureRisk(
             move, hand: hand, position: position, state: state, evaluator: evaluator, ctx: ctx
         )
         if playedPoints > 0 && exposureRisk > 0.05 {
@@ -768,7 +767,7 @@ extension AIPlayer {
 
         let wins = candidateWinsTrick(move.cards, position: position, state: state, evaluator: evaluator)
         let need = leadControlNeed(position: position, hand: hand, state: state, ctx: ctx)
-        let winConfidence = secondHandTrumpWinConfidence(
+        let winConfidence = trumpPullWinConfidence(
             move, hand: hand, position: position, state: state, evaluator: evaluator, ctx: ctx
         )
         let breakPenalty = structureBreakPenalty(cards: move.cards, hand: hand, ts: state.trumpSuit, tr: state.trumpRank)
@@ -850,7 +849,7 @@ extension AIPlayer {
         let costDamp = trumpCostDamping(trickPoints: totalPoints)
         // 抢回出牌权的价值：赢下后手上还有多少可兑现的资产（旁门A、对子/连对、甩牌、长门…）
         let leadControl = trumpLeadControlValue(move: move, hand: hand, position: position, state: state, ctx: ctx)
-        let secondHandAdjustment = secondHandTrumpControlAdjustment(
+        let trumpPullAdjustment = trumpPullControlAdjustment(
             move,
             leadCards: leadCards,
             hand: hand,
@@ -912,7 +911,7 @@ extension AIPlayer {
                 }
             }
         }
-        score += secondHandAdjustment
+        score += trumpPullAdjustment
         return TrumpControlDecision(
             classification: classification,
             score: score,

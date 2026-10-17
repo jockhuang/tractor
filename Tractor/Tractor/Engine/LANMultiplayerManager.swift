@@ -55,6 +55,7 @@ struct GameSnapshot: Codable {
     let attackScore: Int
     let teamLevels: [Int: Rank]
     let dealerTeamIdx: Int
+    let winningTeamIdx: Int?
     let message: String
     let lastRoundResult: RoundResult?
     let lastDrawnCardId: UUID?
@@ -123,7 +124,7 @@ final class LANMultiplayerManager: NSObject, ObservableObject {
         applyLocalPlayerName()
         resetConnections()
         mode = .host
-        statusText = "正在等待其他玩家加入"
+        statusText = L10n.text("lan.waiting_for_players")
         startSession()
 
         advertiser = MCNearbyServiceAdvertiser(
@@ -140,7 +141,7 @@ final class LANMultiplayerManager: NSObject, ObservableObject {
         applyLocalPlayerName()
         resetConnections()
         mode = .client
-        statusText = "正在搜索局域网房间"
+        statusText = L10n.text("lan.searching")
         startSession()
 
         browser = MCNearbyServiceBrowser(peer: peerID, serviceType: serviceType)
@@ -150,7 +151,7 @@ final class LANMultiplayerManager: NSObject, ObservableObject {
 
     func join(_ host: MCPeerID) {
         guard let session else { return }
-        statusText = "正在加入 \(host.displayName)"
+        statusText = L10n.format("lan.joining_format", host.displayName)
         browser?.invitePeer(host, to: session, withContext: nil, timeout: 12)
     }
 
@@ -232,14 +233,14 @@ final class LANMultiplayerManager: NSObject, ObservableObject {
     private static func normalizedPlayerName(_ name: String) -> String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let fallback = UIDevice.current.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let value = trimmed.isEmpty ? (fallback.isEmpty ? "玩家" : fallback) : trimmed
+        let value = trimmed.isEmpty ? (fallback.isEmpty ? L10n.text("player.default_name") : fallback) : trimmed
         var result = ""
         for character in value {
             let candidate = result + String(character)
             guard candidate.utf8.count <= 48 else { break }
             result = candidate
         }
-        return result.isEmpty ? "玩家" : result
+        return result.isEmpty ? L10n.text("player.default_name") : result
     }
 
     private func resetConnections() {
@@ -324,7 +325,7 @@ final class LANMultiplayerManager: NSObject, ObservableObject {
             let data = try JSONEncoder().encode(message)
             try session.send(data, toPeers: peers, with: .reliable)
         } catch {
-            statusText = "发送失败：\(error.localizedDescription)"
+            statusText = L10n.format("lan.send_failed_format", error.localizedDescription)
         }
     }
 
@@ -333,7 +334,7 @@ final class LANMultiplayerManager: NSObject, ObservableObject {
         switch message {
         case .lobby(let lobby):
             self.lobby = lobby
-            statusText = "已连接到房主 \(peer.displayName)"
+            statusText = L10n.format("lan.connected_to_host_format", peer.displayName)
         case .snapshot(let snapshot):
             engine?.apply(snapshot: snapshot)
         case .action(let action):
@@ -352,7 +353,7 @@ final class LANMultiplayerManager: NSObject, ObservableObject {
         discoveredHosts = []
         positionByPeerID = [:]
         connectedPeers = []
-        statusText = "房主已退出"
+        statusText = L10n.text("lan.host_left")
         engine?.returnToMenuFromMultiplayer()
     }
 }
@@ -366,25 +367,33 @@ extension LANMultiplayerManager: MCSessionDelegate {
                 self.refreshHostLobby()
                 switch state {
                 case .connected:
-                    self.statusText = "\(peerID.displayName) 已加入（\(self.lobby.players.count)/4）"
+                    self.statusText = L10n.format(
+                        "lan.peer_joined_format",
+                        peerID.displayName,
+                        self.lobby.players.count
+                    )
                 case .connecting:
-                    self.statusText = "连接中：\(peerID.displayName)"
+                    self.statusText = L10n.format("lan.connecting_format", peerID.displayName)
                 case .notConnected:
-                    self.statusText = "\(peerID.displayName) 已离开（\(self.lobby.players.count)/4）"
+                    self.statusText = L10n.format(
+                        "lan.peer_left_format",
+                        peerID.displayName,
+                        self.lobby.players.count
+                    )
                 @unknown default:
-                    self.statusText = "连接状态变化"
+                    self.statusText = L10n.text("lan.connection_changed")
                 }
                 self.broadcastLobby()
             } else {
                 switch state {
                 case .connected:
-                    self.statusText = "已连接：\(peerID.displayName)"
+                    self.statusText = L10n.format("lan.connected_format", peerID.displayName)
                 case .connecting:
-                    self.statusText = "连接中：\(peerID.displayName)"
+                    self.statusText = L10n.format("lan.connecting_format", peerID.displayName)
                 case .notConnected:
-                    self.statusText = "已断开：\(peerID.displayName)"
+                    self.statusText = L10n.format("lan.disconnected_format", peerID.displayName)
                 @unknown default:
-                    self.statusText = "连接状态变化"
+                    self.statusText = L10n.text("lan.connection_changed")
                 }
 
                 if self.mode == .client && state == .notConnected {
@@ -400,7 +409,7 @@ extension LANMultiplayerManager: MCSessionDelegate {
                 let message = try JSONDecoder().decode(LANMessage.self, from: data)
                 self.handle(message, from: peerID)
             } catch {
-                self.statusText = "接收失败：\(error.localizedDescription)"
+                self.statusText = L10n.format("lan.receive_failed_format", error.localizedDescription)
             }
         }
     }

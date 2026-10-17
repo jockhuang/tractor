@@ -465,9 +465,9 @@ struct TrickEvaluator {
 
         var displayName: String {
             switch self {
-            case .tractor: return "拖拉机"
-            case .pair: return "对子"
-            case .single: return "单张"
+            case .tractor: return L10n.text("pattern.tractor")
+            case .pair: return L10n.text("pattern.pair")
+            case .single: return L10n.text("pattern.single")
             }
         }
     }
@@ -685,7 +685,7 @@ struct TrickEvaluator {
 
         // 连对
         if tractorInfo(of: cards) != nil {
-            return "拖拉机"
+            return L10n.text("speech.tractor")
         }
 
         // 对子
@@ -693,7 +693,7 @@ struct TrickEvaluator {
             let key0 = CardComparator.pairKey(cards[0], trumpSuit: trumpSuit, trumpRank: trumpRank)
             let key1 = CardComparator.pairKey(cards[1], trumpSuit: trumpSuit, trumpRank: trumpRank)
             if key0 == key1 {
-                return "对\(rankName(cards[0].rank))"
+                return L10n.format("speech.pair_format", rankName(cards[0].rank))
             }
         }
 
@@ -701,14 +701,14 @@ struct TrickEvaluator {
         if cards.count == 1 {
             let card = cards[0]
             if CardComparator.isTrump(card, trumpSuit: trumpSuit, trumpRank: trumpRank) {
-                return "吊主"
+                return L10n.text("speech.lead_trump")
             }
             let suit = card.suit.map { suitName($0) } ?? ""
-            return "\(suit)\(rankName(card.rank))"
+            return L10n.format("speech.card_format", suit, rankName(card.rank))
         }
 
         // 甩牌播报"甩牌"
-        if slamInfo(of: cards) != nil { return "甩牌" }
+        if slamInfo(of: cards) != nil { return L10n.text("speech.throw") }
 
         // 其他牌型不播报
         return ""
@@ -716,30 +716,30 @@ struct TrickEvaluator {
 
     private func rankName(_ rank: Rank) -> String {
         switch rank {
-        case .two:       return "二"
-        case .three:     return "三"
-        case .four:      return "四"
-        case .five:      return "五"
-        case .six:       return "六"
-        case .seven:     return "七"
-        case .eight:     return "八"
-        case .nine:      return "九"
-        case .ten:       return "十"
-        case .jack:      return "J"
-        case .queen:     return "Q"
-        case .king:      return "K"
-        case .ace:       return "A"
-        case .smallJoker: return "小王"
-        case .bigJoker:  return "大王"
+        case .two:        return L10n.text("rank.two.spoken")
+        case .three:      return L10n.text("rank.three.spoken")
+        case .four:       return L10n.text("rank.four.spoken")
+        case .five:       return L10n.text("rank.five.spoken")
+        case .six:        return L10n.text("rank.six.spoken")
+        case .seven:      return L10n.text("rank.seven.spoken")
+        case .eight:      return L10n.text("rank.eight.spoken")
+        case .nine:       return L10n.text("rank.nine.spoken")
+        case .ten:        return L10n.text("rank.ten.spoken")
+        case .jack:       return L10n.text("rank.jack.spoken")
+        case .queen:      return L10n.text("rank.queen.spoken")
+        case .king:       return L10n.text("rank.king.spoken")
+        case .ace:        return L10n.text("rank.ace.spoken")
+        case .smallJoker: return L10n.text("rank.small_joker.spoken")
+        case .bigJoker:   return L10n.text("rank.big_joker.spoken")
         }
     }
 
     private func suitName(_ suit: Suit) -> String {
         switch suit {
-        case .spades:   return "黑桃"
-        case .hearts:   return "红桃"
-        case .diamonds: return "方块"
-        case .clubs:    return "梅花"
+        case .spades:   return L10n.text("suit.spades.spoken")
+        case .hearts:   return L10n.text("suit.hearts.spoken")
+        case .diamonds: return L10n.text("suit.diamonds.spoken")
+        case .clubs:    return L10n.text("suit.clubs.spoken")
         }
     }
 }

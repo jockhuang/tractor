@@ -1,0 +1,205 @@
+/* 主菜单 */
+"升 级" = "升 级";
+"拖拉机 · 单机版" = "拖拉机 · 单机版";
+"开始游戏" = "开始游戏";
+"欢乐模式" = "欢乐模式";
+"局域网联机" = "局域网联机";
+"游戏规则" = "游戏规则";
+"音效开" = "音效开";
+"音效关" = "音效关";
+"menu.version_format" = "版本 %@  ·  南北 vs 东西";
+"menu.version_unknown" = "未知";
+"ads.privacy_choices" = "隐私选项";
+"ads.attribution" = "广告";
+"ads.accessibility_label" = "广告";
+"ads.remove_ads" = "无广告订阅";
+"ads.remove_ads_price" = "无广告 · %@ / %@";
+"ads.removed" = "无广告权益";
+"ads.remove_ads_description" = "订阅有效期间可移除此 App 中的广告，并可在使用同一 Apple 账户的设备上恢复。";
+"ads.subscription_active" = "无广告订阅已生效";
+"ads.purchase_active" = "你的无广告订阅正在生效";
+"ads.manage_subscription" = "管理订阅";
+"ads.subscription_terms" = "确认订阅后将从你的 Apple 账户扣款。除非在当前订阅期结束至少 24 小时前取消，否则订阅会自动续期。你可在 App Store 账户设置中管理或取消订阅。";
+"ads.privacy_policy" = "隐私政策";
+"ads.terms_of_use" = "使用条款（EULA）";
+"ads.buy_for_price" = "以 %@ / %@ 订阅";
+"ads.restore_purchases" = "恢复订阅";
+"ads.loading_product" = "正在加载订阅信息…";
+"ads.retry" = "重试";
+"ads.purchasing" = "正在开始订阅…";
+"ads.purchase_pending" = "订阅正在等待批准。";
+"ads.purchase_success" = "订阅已生效，广告已移除。";
+"ads.restoring" = "正在恢复订阅…";
+"ads.restore_success" = "订阅已恢复，广告已移除。";
+"ads.nothing_to_restore" = "此 Apple 账户没有有效的无广告订阅。";
+"ads.product_unavailable" = "无广告订阅暂时不可用。";
+"ads.purchase_failed" = "未能完成订阅。";
+
+/* 局域网 */
+"联机名字" = "联机名字";
+"输入你的名字" = "输入你的名字";
+"断开当前房间后可修改名字。" = "断开当前房间后可修改名字。";
+"发起房间" = "发起房间";
+"搜索加入" = "搜索加入";
+"可加入房间" = "可加入房间";
+"加入" = "加入";
+"当前房间" = "当前房间";
+"还没有房间。发起房间或搜索附近房主。" = "还没有房间。发起房间或搜索附近房主。";
+"待分配" = "待分配";
+"随机分组并开始" = "随机分组并开始";
+"等待房主开始。未满 4 人时，空位会由 AI 接管。" = "等待房主开始。未满 4 人时，空位会由 AI 接管。";
+"关闭" = "关闭";
+"断开" = "断开";
+"player.default_name" = "玩家";
+"lan.waiting_for_players" = "正在等待其他玩家加入";
+"lan.searching" = "正在搜索局域网房间";
+"lan.joining_format" = "正在加入 %@";
+"lan.send_failed_format" = "发送失败：%@";
+"lan.connected_to_host_format" = "已连接到房主 %@";
+"lan.host_left" = "房主已退出";
+"lan.peer_joined_format" = "%@ 已加入（%d/4）";
+"lan.connecting_format" = "连接中：%@";
+"lan.peer_left_format" = "%@ 已离开（%d/4）";
+"lan.connection_changed" = "连接状态变化";
+"lan.connected_format" = "已连接：%@";
+"lan.disconnected_format" = "已断开：%@";
+"lan.receive_failed_format" = "接收失败：%@";
+
+/* 规则 */
+"基本规则" = "基本规则";
+"主牌体系" = "主牌体系";
+"出牌" = "出牌";
+"计分" = "计分";
+"升级" = "升级";
+"完成" = "完成";
+"rules.basic.body" = "• 4 人游戏：南北 vs 东西，两两一队\n• 使用两副完整扑克牌（108 张），含大小王\n• 庄家方持有当前「级」（从 2 开始，逐步升到 A）";
+"rules.trump.body" = "• 庄家方亮出「主花色」\n• 主牌由高到低：大王 > 小王 > 主花色级牌 > 其他花色级牌 > 主花色其他牌\n• 级牌无论什么花色都是主牌";
+"rules.play.body" = "• 先手可以出单张、对子、连对（拖拉机）\n• 跟牌必须跟同花色，不足时可以补其他牌\n• 副牌不能压主牌，主牌可以压任意副牌";
+"rules.scoring.body" = "• 5 = 5 分，10 = 10 分，K = 10 分\n• 攻方（非庄家方）累计 ≥ 80 分则赢得本局\n• 最后一墩赢家获得底牌分与倍数加成";
+"rules.level.body" = "• 庄家方赢：根据攻方得分，庄家方升 1～3 级\n• 攻方赢：攻方成为下一局庄家\n• 120 分升 1 级，160 分升 2 级\n• 升到 A 后仍要打 A 这一局；在 A 级再次升级才获胜";
+
+/* 座位、牌与通用标签 */
+"player.me" = "我";
+"seat.south" = "南";
+"seat.west" = "西";
+"seat.north" = "北";
+"seat.east" = "东";
+"team.north_south" = "南北";
+"team.east_west" = "东西";
+"team.north_south_full" = "南北队";
+"team.east_west_full" = "东西队";
+"team.dealer_badge" = "庄";
+"team.attack_badge" = "攻";
+"rank.small_joker.short" = "小王";
+"rank.big_joker.short" = "大王";
+"rank.small_joker.spoken" = "小王";
+"rank.big_joker.spoken" = "大王";
+"joker.big_mark" = "大";
+"joker.small_mark" = "小";
+"joker.name" = "王";
+"cards.count_format" = "%d 张";
+"player.cards_format" = "%@  %d 张";
+"player.name_seat_format" = "%@（%@）";
+"points.format" = "%d 分";
+
+/* 发牌与亮主 */
+"dealing.progress_format" = "发牌 %d/100";
+"暂无亮主" = "暂无亮主";
+"declaration.single" = "单张";
+"declaration.pair" = "对子";
+"declaration.joker_no_trump" = "王牌 · 无主";
+"declaration.joker_pair" = "王牌对";
+"declaration.no_trump" = "无主";
+"game.message.dealing" = "正在发牌，可亮主……";
+"game.message.no_declaration" = "无人亮主，请选牌亮主。";
+"game.message.select_level_format" = "请先选择级牌（%@）来亮主。";
+"game.message.already_no_trump" = "已是无主，不可再反。";
+"game.message.invalid_declaration_rank_format" = "亮主只能使用 %@（或对子王牌反无主）。";
+"game.message.declaration_same_suit" = "亮主的牌必须是同一花色。";
+"game.message.need_pair" = "需要对子才能反主。";
+"game.message.joker_pair_available" = "级牌已满，可用小王或大王对反无主。";
+"game.message.strongest_declaration" = "已是最强亮主。";
+"game.message.declared_format" = "%@ 亮主：%@%@ %@";
+"game.message.declaration_single_badge" = "（单张）";
+"game.message.declaration_pair_badge" = "（对子）";
+"game.message.declaration_no_trump_badge" = "（王牌对 · 无主）";
+
+/* 换底与出牌 */
+"选 8 张压底牌" = "选 8 张压底牌";
+"确认换底" = "确认换底";
+"game.message.choose_kitty_format" = "%@ 请选择 8 张牌压入底牌。";
+"game.message.choose_exactly_kitty" = "请选择恰好 8 张牌放入底牌。";
+"game.message.kitty_selection_changed" = "所选底牌已变更，请重新选择 8 张。";
+"game.message.kitty_complete" = "换底完成，开始出牌。";
+"game.play_button_required_format" = "出牌（%d/%d 张）";
+"game.play_button_format" = "出牌（%d 张）";
+"轮到你出牌" = "轮到你出牌";
+"game.message.play_count_format" = "请出 %d 张牌。";
+"game.message.invalid_play" = "出牌不合法，请检查花色与牌型。";
+"game.message.player_invalid_format" = "%@ 出牌不合法，已取消。";
+"game.message.player_played_format" = "%@ 出了 %@";
+"game.message.trick_won_format" = "%@ 赢得本墩，+%d 分｜攻方累计：%d 分";
+"game.message.kitty_captured_format" = "攻方吃底牌 ×%d，+%d 分。";
+"game.message.kitty_defended" = "庄家方保底。";
+"game.message.slam_failed_format" = "%@ 甩牌失败 −%d 分，强制出最小%@：%@";
+"speech.trumped" = "毙";
+
+/* 牌桌与结算 */
+"主" = "主";
+"主：" = "主：";
+"game.attack_score_compact_format" = "攻 %d 分";
+"game.attack_score_format" = "攻方 %d 分";
+"记录" = "记录";
+"退出" = "退出";
+"退出当前游戏并返回开始界面" = "退出当前游戏并返回开始界面";
+"主菜单" = "主菜单";
+"再来一局 ↺" = "再来一局 ↺";
+"game.winner_format" = "%@ 获胜！";
+"round.attackers_win" = "🎉 攻方胜利";
+"round.dealers_hold" = "🏆 庄家方守住";
+"下一局 →" = "下一局 →";
+"底牌" = "底牌";
+"round.kitty_bonus_format" = "×%d → +%d 分";
+"底牌无分" = "底牌无分";
+"庄家保底" = "庄家保底";
+"round.levels_format" = "+%d 级";
+
+/* 历史记录 */
+"本局记录" = "本局记录";
+"history.summary_format" = "%d 次亮主 · %d 墩";
+"亮主 / 反主记录" = "亮主／反主记录";
+"出牌记录" = "出牌记录";
+"亮主" = "亮主";
+"反主" = "反主";
+"已知牌" = "已知牌";
+"未记录具体牌" = "未记录具体牌";
+"history.declaration_format" = "%@ · %@";
+
+/* 牌型与语音 */
+"pattern.tractor" = "拖拉机";
+"pattern.pair" = "对子";
+"pattern.single" = "单张";
+"speech.tractor" = "拖拉机";
+"speech.pair_format" = "对%@";
+"speech.card_format" = "%@%@";
+"speech.lead_trump" = "吊主";
+"speech.throw" = "甩牌";
+"rank.two.spoken" = "二";
+"rank.three.spoken" = "三";
+"rank.four.spoken" = "四";
+"rank.five.spoken" = "五";
+"rank.six.spoken" = "六";
+"rank.seven.spoken" = "七";
+"rank.eight.spoken" = "八";
+"rank.nine.spoken" = "九";
+"rank.ten.spoken" = "十";
+"rank.jack.spoken" = "J";
+"rank.queen.spoken" = "Q";
+"rank.king.spoken" = "K";
+"rank.ace.spoken" = "A";
+"suit.spades.spoken" = "黑桃";
+"suit.hearts.spoken" = "红桃";
+"suit.diamonds.spoken" = "方块";
+"suit.clubs.spoken" = "梅花";
+
+

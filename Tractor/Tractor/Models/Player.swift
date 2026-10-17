@@ -11,19 +11,19 @@ enum PlayerPosition: Int, CaseIterable, Codable {
 
     var displayName: String {
         switch self {
-        case .south: return "我"
-        case .west:  return "西"
-        case .north: return "北"
-        case .east:  return "东"
+        case .south: return L10n.text("player.me")
+        case .west:  return L10n.text("seat.west")
+        case .north: return L10n.text("seat.north")
+        case .east:  return L10n.text("seat.east")
         }
     }
 
     var seatName: String {
         switch self {
-        case .south: return "南"
-        case .west:  return "西"
-        case .north: return "北"
-        case .east:  return "东"
+        case .south: return L10n.text("seat.south")
+        case .west:  return L10n.text("seat.west")
+        case .north: return L10n.text("seat.north")
+        case .east:  return L10n.text("seat.east")
         }
     }
 

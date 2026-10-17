@@ -34,7 +34,7 @@ struct DealingOverlayView: View {
                 Image(systemName: "rectangle.stack.fill")
                     .font(.caption2)
                     .foregroundColor(.white.opacity(0.6))
-                Text("发牌 \(state.dealtCount)/100")
+                Text(L10n.format("dealing.progress_format", state.dealtCount))
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.white)
                 progressBar
@@ -131,7 +131,7 @@ struct DealingOverlayView: View {
                 .background(Color.white.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             } else {
-                Text("暂无亮主")
+                Text(L10n.text("暂无亮主"))
                     .font(.system(size: 10))
                     .foregroundColor(.white.opacity(0.35))
                     .padding(.horizontal, 8)
@@ -144,9 +144,9 @@ struct DealingOverlayView: View {
 
     private func badgeLabel(_ strength: Int) -> String {
         switch strength {
-        case 1: return "单张"
-        case 2: return "对子"
-        case 3: return "王牌·无主"
+        case 1: return L10n.text("declaration.single")
+        case 2: return L10n.text("declaration.pair")
+        case 3: return L10n.text("declaration.joker_no_trump")
         default: return ""
         }
     }
@@ -221,7 +221,7 @@ struct DealingOverlayView: View {
             engine.humanDeclareTrump()
         }) {
             VStack(spacing: 2) {
-                Text("无主")
+                Text(L10n.text("declaration.no_trump"))
                     .font(.system(size: 11, weight: .bold))
                     .foregroundColor(canUse ? .white : .white.opacity(0.22))
                 HStack(spacing: 2) {

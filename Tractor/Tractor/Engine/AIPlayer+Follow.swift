@@ -44,7 +44,7 @@ extension AIPlayer {
             evaluator.isValidPlay(selected: $0.cards, hand: hand, leadCards: leadCards)
         }
 
-        let exposureFilteredLegal = filterUnsafeSecondHandTrumpPointExposure(
+        let exposureFilteredLegal = filterUnsafeTrumpPointExposureBeforeUnknownOpponent(
             legal,
             leadCards: leadCards,
             hand: hand,
@@ -1167,10 +1167,10 @@ extension AIPlayer {
     }
 
 
-    /// P2 跟吊主时，限制对象是 Point Exposure，不是 Trump Strength：
+    /// 跟吊主且后手仍有未知对手时，限制对象是 Point Exposure，不是 Trump Strength：
     /// 后手仍有未知对手且本墩未锁定时，不把主 5/10/K 裸送进 0 分墩；
     /// 无分大主仍交给 Trump Control / leadControlNeed 评分决定是否值得抢出牌权。
-    static func filterUnsafeSecondHandTrumpPointExposure(
+    static func filterUnsafeTrumpPointExposureBeforeUnknownOpponent(
         _ moves: [AIMove],
         leadCards: [Card],
         hand: [Card],
@@ -1180,8 +1180,7 @@ extension AIPlayer {
         ctx: AIContext
     ) -> [AIMove] {
         guard moves.count > 1,
-              evaluator.dominantSuit(of: leadCards) == nil,
-              state.currentTrick.plays.count == 1 else { return moves }
+              evaluator.dominantSuit(of: leadCards) == nil else { return moves }
 
         let futureUnknownOpponents = unplayedSubsequentPositions(after: position, in: state)
             .filter { $0.team != position.team && !ctx.isVoid($0, key: "TRUMP") }
@@ -1205,7 +1204,7 @@ extension AIPlayer {
     }
 
 
-    /// P2/P3 绝副牌时，若已知后手对手也绝该门且仍可能有主，双方进入盖吃竞争：
+    /// 绝副牌时，若已知后手对手也绝该门且仍可能有主，双方进入盖吃竞争：
     /// - 只用最小的、当前可赢的主 A / 级牌参与；
     /// - 弱主和主分牌不参与，有 0 分副牌时直接垫牌；
     /// - 大小王作为最高控制资产，不用于这类竞争。
@@ -1592,8 +1591,8 @@ extension AIPlayer {
         let need = initiativeNeed(position: position, hand: hand, state: state, ctx: ctx)
         guard need >= 100 else { return moves }
 
-        let secondHandTrumpPull = state.currentTrick.leadCards.map {
-            isSecondHandTrumpPull(
+        let trumpPullWithUnknownOpponentBehind = state.currentTrick.leadCards.map {
+            isTrumpPullWithUnknownOpponentBehind(
                 leadCards: $0,
                 position: position,
                 state: state,
@@ -1620,9 +1619,9 @@ extension AIPlayer {
                     evaluator: evaluator,
                     ctx: ctx
                 ) else { return false }
-                if secondHandTrumpPull {
+                if trumpPullWithUnknownOpponentBehind {
                     let playedPoints = $0.cards.reduce(0) { $0 + $1.pointValue }
-                    let exposureRisk = secondHandTrumpPointExposureRisk(
+                    let exposureRisk = trumpPullPointExposureRisk(
                         $0,
                         hand: hand,
                         position: position,
@@ -1630,7 +1629,7 @@ extension AIPlayer {
                         evaluator: evaluator,
                         ctx: ctx
                     )
-                    let winConfidence = secondHandTrumpWinConfidence(
+                    let winConfidence = trumpPullWinConfidence(
                         $0,
                         hand: hand,
                         position: position,

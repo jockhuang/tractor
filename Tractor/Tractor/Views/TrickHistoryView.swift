@@ -25,11 +25,15 @@ struct TrickHistoryPanel: View {
                 VStack(spacing: 0) {
                     // 标题栏
                     HStack {
-                        Text("本局记录")
+                        Text(L10n.text("本局记录"))
                             .font(.title2.bold())
                             .foregroundColor(.white)
                         Spacer()
-                        Text("\(declarationEvents.count) 次亮主 · \(tricks.count) 墩")
+                        Text(L10n.format(
+                            "history.summary_format",
+                            declarationEvents.count,
+                            tricks.count
+                        ))
                             .font(.system(size: 15))
                             .foregroundColor(.white.opacity(0.5))
                         Button(action: onClose) {
@@ -49,7 +53,7 @@ struct TrickHistoryPanel: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 0) {
                             if !declarationEvents.isEmpty {
-                                sectionHeader("亮主 / 反主记录")
+                                sectionHeader(L10n.text("亮主 / 反主记录"))
                                 ForEach(declarationEvents) { event in
                                     DeclarationHistoryRow(event: event, playerNames: playerNames)
                                     Divider().background(Color.white.opacity(0.08))
@@ -58,7 +62,7 @@ struct TrickHistoryPanel: View {
                             }
 
                             if !tricks.isEmpty {
-                                sectionHeader("出牌记录")
+                                sectionHeader(L10n.text("出牌记录"))
                                 ForEach(Array(tricks.enumerated()), id: \.offset) { idx, trick in
                                     TrickHistoryRow(
                                         index: idx + 1,
@@ -110,7 +114,7 @@ private struct DeclarationHistoryRow: View {
                     Text(displayName(for: event.declarer))
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(.white)
-                    Text(event.sequence == 1 ? "亮主" : "反主")
+                    Text(L10n.text(event.sequence == 1 ? "亮主" : "反主"))
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(.yellow)
                     Text(declarationText)
@@ -119,11 +123,11 @@ private struct DeclarationHistoryRow: View {
                 }
 
                 HStack(spacing: 6) {
-                    Text("已知牌")
+                    Text(L10n.text("已知牌"))
                         .font(.system(size: 13))
                         .foregroundColor(.white.opacity(0.45))
                     if event.revealedCards.isEmpty {
-                        Text("未记录具体牌")
+                        Text(L10n.text("未记录具体牌"))
                             .font(.system(size: 13))
                             .foregroundColor(.white.opacity(0.35))
                     } else {
@@ -140,15 +144,17 @@ private struct DeclarationHistoryRow: View {
     }
 
     private var declarationText: String {
-        let suitText = event.suit?.rawValue ?? "无主"
+        let suitText = event.suit?.rawValue ?? L10n.text("declaration.no_trump")
         let strengthText: String
         switch event.strength {
-        case 1: strengthText = "单张"
-        case 2: strengthText = "对子"
-        case 3: strengthText = "王牌对"
+        case 1: strengthText = L10n.text("declaration.single")
+        case 2: strengthText = L10n.text("declaration.pair")
+        case 3: strengthText = L10n.text("declaration.joker_pair")
         default: strengthText = ""
         }
-        return strengthText.isEmpty ? suitText : "\(suitText) · \(strengthText)"
+        return strengthText.isEmpty
+            ? suitText
+            : L10n.format("history.declaration_format", suitText, strengthText)
     }
 
     private func displayName(for position: PlayerPosition) -> String {

@@ -2,6 +2,29 @@ import Foundation
 import Combine
 import SwiftUI
 
+struct LevelProgression {
+    let level: Rank
+    let passedAce: Bool
+
+    static func advancing(from current: Rank, by steps: Int) -> LevelProgression {
+        guard steps > 0 else {
+            return LevelProgression(level: current, passedAce: false)
+        }
+        // Reaching A starts the A round. The game is won only by advancing again from A.
+        guard current != .ace else {
+            return LevelProgression(level: .ace, passedAce: true)
+        }
+
+        let playableRanks: [Rank] = [
+            .two, .three, .four, .five, .six, .seven,
+            .eight, .nine, .ten, .jack, .queen, .king, .ace
+        ]
+        let targetValue = min(current.rawValue + steps, Rank.ace.rawValue)
+        let nextLevel = playableRanks.first { $0.rawValue >= targetValue } ?? .ace
+        return LevelProgression(level: nextLevel, passedAce: false)
+    }
+}
+
 @MainActor
 class GameEngine: ObservableObject {
 
@@ -17,6 +40,7 @@ class GameEngine: ObservableObject {
     private var trickResolutionTask: Task<Void, Never>?
     private var aiTurnGeneration = 0
     private var trickResolutionGeneration = 0
+    private var isPlayInProgress = false
     private var lastDrawnCardIDsByPosition: [PlayerPosition: UUID] = [:]
     let multiplayer = LANMultiplayerManager()
     @Published var localPosition: PlayerPosition = .south
@@ -106,7 +130,7 @@ class GameEngine: ObservableObject {
         }
         setDealer(dealerPos)
 
-        state.message = "正在发牌，可亮主..."
+        state.message = L10n.text("game.message.dealing")
 
         // 启动发牌动画任务
         dealingTask = Task { await self.dealCardsAnimated() }
@@ -172,6 +196,8 @@ class GameEngine: ObservableObject {
         // 若人类已无法亮主或反主（手中无合法牌），直接跳过倒计时
         for remaining in stride(from: 10, through: 1, by: -1) {
             if Task.isCancelled { return }
+            // 倒计时期间真人亮主可能已提前进入换底；旧发牌任务不能再次推进阶段。
+            guard state.phase == .dealing else { return }
             // 每秒重新检测：若人类无法再亮/反主，提前结束倒计时
             if !humanControlledPositions.isEmpty && !humanCanDeclareOrOverride() { break }
             state.postDealCountdown = remaining
@@ -180,6 +206,7 @@ class GameEngine: ObservableObject {
         }
         state.postDealCountdown = 0
         if Task.isCancelled { return }
+        guard state.phase == .dealing else { return }
 
         afterDealingComplete()
         syncMultiplayerState()
@@ -208,10 +235,11 @@ class GameEngine: ObservableObject {
     // MARK: - 发牌结束后处理
 
     private func afterDealingComplete() {
+        guard state.phase == .dealing else { return }
         // 若无人亮主，且庄家是真人 → 等待真人亮主
         if state.trumpDeclaration == nil {
             if humanControlledPositions.contains(state.dealerPosition) {
-                state.message = "无人亮主，请选牌亮主"
+                state.message = L10n.text("game.message.no_declaration")
                 // 仍在 .dealing 阶段，等待人类操作
                 syncMultiplayerState()
                 return
@@ -272,7 +300,7 @@ class GameEngine: ObservableObject {
         let player = state.player(position)
         let selected = player.hand.filter { selectedIDs.contains($0.id) }
         guard !selected.isEmpty else {
-            state.message = "请先选择级牌（\(state.trumpRank.display)）来亮主"
+            state.message = L10n.format("game.message.select_level_format", state.trumpRank.display)
             syncMultiplayerState()
             return
         }
@@ -287,7 +315,7 @@ class GameEngine: ObservableObject {
              selected.allSatisfy { $0.rank == .bigJoker })
         if isJokerPair {
             guard cur < 3 else {
-                state.message = "已是无主，不可再反"
+                state.message = L10n.text("game.message.already_no_trump")
                 syncMultiplayerState()
                 return
             }
@@ -300,7 +328,7 @@ class GameEngine: ObservableObject {
 
         // ── 普通路径：级牌亮主 ──────────────────────────
         guard selected.allSatisfy({ $0.rank == tr && !$0.isJoker }) else {
-            state.message = "亮主只能使用 \(tr.display)（或对子王牌反无主）"
+            state.message = L10n.format("game.message.invalid_declaration_rank_format", tr.display)
             syncMultiplayerState()
             return
         }
@@ -308,7 +336,7 @@ class GameEngine: ObservableObject {
         // 必须同一花色
         let suits = Set(selected.compactMap { $0.suit })
         guard suits.count == 1, let suit = suits.first else {
-            state.message = "亮主的牌必须是同一花色"
+            state.message = L10n.text("game.message.declaration_same_suit")
             syncMultiplayerState()
             return
         }
@@ -319,9 +347,9 @@ class GameEngine: ObservableObject {
         guard strength > cur else {
             let hint: String
             switch cur {
-            case 1: hint = "需要对子才能反主"
-            case 2: hint = "级牌已满，可用小王或大王对反无主"
-            default: hint = "已是最强亮主"
+            case 1: hint = L10n.text("game.message.need_pair")
+            case 2: hint = L10n.text("game.message.joker_pair_available")
+            default: hint = L10n.text("game.message.strongest_declaration")
             }
             state.message = hint
             syncMultiplayerState()
@@ -681,13 +709,19 @@ class GameEngine: ObservableObject {
         }
         let badge: String
         switch strength {
-        case 1: badge = "（单张）"
-        case 2: badge = "（对子）"
-        case 3: badge = "（王牌对·无主）"
+        case 1: badge = L10n.text("game.message.declaration_single_badge")
+        case 2: badge = L10n.text("game.message.declaration_pair_badge")
+        case 3: badge = L10n.text("game.message.declaration_no_trump_badge")
         default: badge = ""
         }
-        let suitStr = suit.map { $0.rawValue } ?? "无主"
-        state.message = "\(displayName(for: position)) 亮主：\(suitStr)\(strength < 3 ? state.trumpRank.display : "") \(badge)"
+        let suitStr = suit.map { $0.rawValue } ?? L10n.text("declaration.no_trump")
+        state.message = L10n.format(
+            "game.message.declared_format",
+            displayName(for: position),
+            suitStr,
+            strength < 3 ? state.trumpRank.display : "",
+            badge
+        )
         syncMultiplayerState()
     }
 
@@ -720,12 +754,16 @@ class GameEngine: ObservableObject {
     // MARK: - 换底牌
 
     private func proceedToKittyExchange() {
+        guard state.phase == .dealing,
+              state.dealtCount == 100,
+              state.kitty.count == 8 else { return }
         // 重新排序（主牌已确定）
         for pos in PlayerPosition.allCases {
             state.player(pos).sortHand(trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
         }
 
         state.phase        = .kittyExchange
+        state.postDealCountdown = 0
         state.currentTurn  = state.dealerPosition   // 让庄家手牌可交互
 
         if humanControlledPositions.contains(state.dealerPosition) {
@@ -734,7 +772,10 @@ class GameEngine: ObservableObject {
             dealer.hand.append(contentsOf: state.kitty)
             dealer.sortHand(trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
             state.kitty    = []
-            state.message  = "\(displayName(for: state.dealerPosition)) 请选择 8 张牌压入底牌"
+            state.message = L10n.format(
+                "game.message.choose_kitty_format",
+                displayName(for: state.dealerPosition)
+            )
             syncMultiplayerState()
         } else {
             // AI 庄家自动换底
@@ -747,7 +788,9 @@ class GameEngine: ObservableObject {
     }
 
     func confirmKittyExchange(position: PlayerPosition, selectedIDs: Set<UUID>) {
-        guard !state.isResolvingTrick else { return }
+        guard state.phase == .kittyExchange,
+              !state.isResolvingTrick,
+              position == state.dealerPosition else { return }
 
         if multiplayer.isClient {
             multiplayer.sendAction(MultiplayerAction(
@@ -759,17 +802,22 @@ class GameEngine: ObservableObject {
         }
 
         guard selectedIDs.count == 8 else {
-            state.message = "请选择恰好 8 张牌放入底牌"
+            state.message = L10n.text("game.message.choose_exactly_kitty")
             syncMultiplayerState()
             return
         }
         let player = state.player(position)
         let selected = player.hand.filter { selectedIDs.contains($0.id) }
+        guard selected.count == 8 else {
+            state.message = L10n.text("game.message.kitty_selection_changed")
+            syncMultiplayerState()
+            return
+        }
         state.kitty = selected
         player.hand.removeAll { selectedIDs.contains($0.id) }
         player.sortHand(trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
         state.selectedCards = []
-        state.message = "换底完成，开始出牌"
+        state.message = L10n.text("game.message.kitty_complete")
         startPlaying()
         syncMultiplayerState()
     }
@@ -818,12 +866,13 @@ class GameEngine: ObservableObject {
         state.kitty    = kittyCards
         player.hand.removeAll { kittyIDs.contains($0.id) }
 
-        state.message = "换底完成，开始出牌"
+        state.message = L10n.text("game.message.kitty_complete")
         startPlaying()
         syncMultiplayerState()
     }
 
     private func startPlaying() {
+        guard state.phase == .kittyExchange else { return }
         state.phase         = .playing
         state.isResolvingTrick = false
         state.currentLeader = state.dealerPosition
@@ -844,7 +893,7 @@ class GameEngine: ObservableObject {
     }
 
     func humanPlay(position: PlayerPosition, selectedIDs: Set<UUID>) {
-        guard !state.isResolvingTrick else {
+        guard !state.isResolvingTrick, !isPlayInProgress else {
             state.selectedCards = []
             return
         }
@@ -860,7 +909,8 @@ class GameEngine: ObservableObject {
 
         guard state.phase == .playing,
               !state.isResolvingTrick,
-              state.currentTurn == position else { return }
+              state.currentTurn == position,
+              expectedTurnForCurrentTrick() == position else { return }
 
         let player = state.player(position)
         let selected = player.hand.filter { selectedIDs.contains($0.id) }
@@ -868,7 +918,7 @@ class GameEngine: ObservableObject {
 
         let leadCount = state.currentTrick.leadCards?.count ?? selected.count
         guard selected.count == leadCount else {
-            state.message = "请出 \(leadCount) 张牌"
+            state.message = L10n.format("game.message.play_count_format", leadCount)
             syncMultiplayerState()
             return
         }
@@ -879,7 +929,7 @@ class GameEngine: ObservableObject {
                 selected: selected,
                 hand: player.hand,
                 leadCards: state.currentTrick.leadCards!) else {
-                state.message = "出牌不合法，请检查花色"
+                state.message = L10n.text("game.message.invalid_play")
                 syncMultiplayerState()
                 return
             }
@@ -891,7 +941,9 @@ class GameEngine: ObservableObject {
     private func performPlay(position: PlayerPosition, cards: [Card]) {
         guard state.phase == .playing,
               !state.isResolvingTrick,
+              !isPlayInProgress,
               state.currentTurn == position,
+              expectedTurnForCurrentTrick() == position,
               !cards.isEmpty,
               state.currentTrick.plays.count < 4,
               !state.currentTrick.plays.contains(where: { $0.position == position }) else { return }
@@ -907,17 +959,31 @@ class GameEngine: ObservableObject {
         if let leadCards = state.currentTrick.leadCards {
             let evaluator = makeEvaluator()
             guard evaluator.isValidPlay(selected: cards, hand: player.hand, leadCards: leadCards) else {
-                state.message = "\(displayName(for: position)) 出牌不合法，已取消"
+                state.message = L10n.format(
+                    "game.message.player_invalid_format",
+                    displayName(for: position)
+                )
                 syncMultiplayerState()
                 return
             }
         }
 
+        isPlayInProgress = true
+        defer { isPlayInProgress = false }
+        cancelAITurnTask()
         SoundManager.shared.playCardSlap()
         player.play(cards: cards)
         state.currentTrick.plays.append((position: position, cards: cards))
+        // 牌入墩后立刻移交出牌权；后续甩牌分析和语音不会延长本家的回合。
+        if !state.currentTrick.isComplete {
+            state.currentTurn = nextPosition(after: position)
+        }
         state.selectedCards = []
-        state.message = "\(displayName(for: position)) 出了 \(cards.map { $0.shortDisplay }.joined(separator: " "))"
+        state.message = L10n.format(
+            "game.message.player_played_format",
+            displayName(for: position),
+            cards.map { $0.shortDisplay }.joined(separator: " ")
+        )
 
         // 首张：失败甩牌自动收缩为甩牌方的最小失败组件。
         if state.currentTrick.plays.count == 1 {
@@ -934,15 +1000,14 @@ class GameEngine: ObservableObject {
             if evaluator.dominantSuit(of: leadCards) != nil,          // 先手是副牌
                evaluator.dominantSuit(of: cards) == nil,              // 当前出的是主牌
                evaluator.winner(of: state.currentTrick) == position { // 出牌后自己是赢家
-                SoundManager.shared.speakLead("毙")
+                SoundManager.shared.speakLead(L10n.text("speech.trumped"))
             }
         }
 
         if state.currentTrick.isComplete {
             beginTrickResolution()
         } else {
-            let next = nextPosition(after: position)
-            state.currentTurn = next
+            let next = state.currentTurn
             syncMultiplayerState()
             if !humanControlledPositions.contains(next) {
                 scheduleAITurn(position: next, delay: aiDelay)
@@ -980,7 +1045,12 @@ class GameEngine: ObservableObject {
         state.completedTricks.append(state.currentTrick)
         state.currentLeader = winner
         state.currentTurn   = winner
-        state.message = "\(displayName(for: winner)) 赢得本墩，+\(points) 分 | 攻方累计：\(state.attackScore) 分"
+        state.message = L10n.format(
+            "game.message.trick_won_format",
+            displayName(for: winner),
+            points,
+            state.attackScore
+        )
         syncMultiplayerState()
 
         if state.players.allSatisfy({ $0.hand.isEmpty }) {
@@ -1022,9 +1092,9 @@ class GameEngine: ObservableObject {
             rawKittyPts   = kittyPoints
             let bonus     = kittyPoints * multiplier
             finalScore   += bonus
-            state.message = "攻方吃底牌 ×\(multiplier)，+\(bonus) 分"
+            state.message = L10n.format("game.message.kitty_captured_format", multiplier, bonus)
         } else {
-            state.message = "庄家方保底"
+            state.message = L10n.text("game.message.kitty_defended")
         }
 
         let threshold   = 80
@@ -1055,20 +1125,23 @@ class GameEngine: ObservableObject {
             rawKittyPoints: rawKittyPts
         )
 
+        let winningTeam = attackWon ? state.attackTeamIdx : state.dealerTeamIdx
+        let passedAce: Bool
+
         if attackWon {
-            advanceLevel(team: state.attackTeamIdx, steps: attackAdvance)
+            passedAce = advanceLevel(team: state.attackTeamIdx, steps: attackAdvance)
             // 攻方胜：新庄家 = 当前庄家顺时针下一位
             state.pendingDealerPosition = nextPosition(after: state.dealerPosition)
             state.dealerTeamIdx = state.attackTeamIdx
         } else {
-            advanceLevel(team: state.dealerTeamIdx, steps: dealerAdvance)
+            passedAce = advanceLevel(team: state.dealerTeamIdx, steps: dealerAdvance)
             // 守方胜：无论第几局，庄家都在队内轮换（搭档接任）
             let partnerRaw = (state.dealerPosition.rawValue + 2) % 4
             state.pendingDealerPosition = PlayerPosition(rawValue: partnerRaw)
         }
 
-        if teamLevelRank(state.dealerTeamIdx) == .ace ||
-           teamLevelRank(state.attackTeamIdx) == .ace {
+        if passedAce {
+            state.winningTeamIdx = winningTeam
             state.phase = .gameOver
         }
 
@@ -1105,11 +1178,11 @@ class GameEngine: ObservableObject {
         return count * 2
     }
 
-    private func advanceLevel(team: Int, steps: Int) {
-        let ranks: [Rank] = [.two,.three,.four,.five,.six,.seven,.eight,.nine,.ten,.jack,.queen,.king,.ace]
-        let cur  = teamLevelRank(team)
-        let val  = min(cur.rawValue + steps, Rank.ace.rawValue)
-        state.teamLevels[team] = ranks.first { $0.rawValue >= val } ?? .ace
+    @discardableResult
+    private func advanceLevel(team: Int, steps: Int) -> Bool {
+        let progress = LevelProgression.advancing(from: teamLevelRank(team), by: steps)
+        state.teamLevels[team] = progress.level
+        return progress.passedAce
     }
 
     private func teamLevelRank(_ team: Int) -> Rank { state.teamLevels[team] ?? .two }
@@ -1120,6 +1193,7 @@ class GameEngine: ObservableObject {
         guard state.phase == .playing,
               !state.isResolvingTrick,
               state.currentTurn == position,
+              expectedTurnForCurrentTrick() == position,
               !state.currentTrick.plays.contains(where: { $0.position == position }) else { return }
 
         let cards = AIPlayer.chooseCards(
@@ -1134,6 +1208,7 @@ class GameEngine: ObservableObject {
         guard state.phase == .playing,
               !state.isResolvingTrick,
               state.currentTurn == position,
+              expectedTurnForCurrentTrick() == position,
               !humanControlledPositions.contains(position) else { return }
 
         cancelAITurnTask()
@@ -1178,6 +1253,7 @@ class GameEngine: ObservableObject {
               !state.isResolvingTrick,
               state.roundNumber == roundNumber,
               state.currentTurn == position,
+              expectedTurnForCurrentTrick() == position,
               state.currentTrick.leadPosition == leadPosition,
               state.currentTrick.plays.count == playCount,
               state.completedTricks.count == completedCount,
@@ -1282,7 +1358,13 @@ class GameEngine: ObservableObject {
         let forcedDisplay = failure.forcedLeadCards
             .map(\.shortDisplay)
             .joined(separator: " ")
-        state.message = "\(displayName(for: position)) 甩牌失败 -\(failure.penaltyPoints)分，强制出最小\(failure.forcedKind.displayName)：\(forcedDisplay)"
+        state.message = L10n.format(
+            "game.message.slam_failed_format",
+            displayName(for: position),
+            failure.penaltyPoints,
+            failure.forcedKind.displayName,
+            forcedDisplay
+        )
         return failure.forcedLeadCards
     }
 
@@ -1353,6 +1435,7 @@ class GameEngine: ObservableObject {
             attackScore: state.attackScore,
             teamLevels: state.teamLevels,
             dealerTeamIdx: state.dealerTeamIdx,
+            winningTeamIdx: state.winningTeamIdx,
             message: state.message,
             lastRoundResult: state.lastRoundResult,
             lastDrawnCardId: lastDrawnCardIDsByPosition[position],
@@ -1381,6 +1464,7 @@ class GameEngine: ObservableObject {
         state.attackScore = snapshot.attackScore
         state.teamLevels = snapshot.teamLevels
         state.dealerTeamIdx = snapshot.dealerTeamIdx
+        state.winningTeamIdx = snapshot.winningTeamIdx
         state.message = snapshot.message
         state.lastRoundResult = snapshot.lastRoundResult
         state.lastDrawnCardId = snapshot.lastDrawnCardId
@@ -1424,6 +1508,18 @@ class GameEngine: ObservableObject {
     private func nextPosition(after pos: PlayerPosition) -> PlayerPosition {
         let order: [PlayerPosition] = [.south, .west, .north, .east]
         return order[(order.firstIndex(of: pos)! + 1) % 4]
+    }
+
+    /// 用本墩已出的牌验证出牌权，拒绝重复或乱序的 AI/联机回调。
+    private func expectedTurnForCurrentTrick() -> PlayerPosition? {
+        let trick = state.currentTrick
+        guard trick.plays.count < 4 else { return nil }
+        var expected = trick.leadPosition
+        for play in trick.plays {
+            guard play.position == expected else { return nil }
+            expected = nextPosition(after: expected)
+        }
+        return expected
     }
 
 }

@@ -66,6 +66,65 @@ func completedClubsRank(_ rank: Rank) -> Trick {
     return t
 }
 
+func seat(after position: PlayerPosition, offset: Int) -> PlayerPosition {
+    PlayerPosition(rawValue: (position.rawValue + offset) % PlayerPosition.allCases.count)!
+}
+
+/// 截图中第 3 墩之前的两墩记录；座次整体轮转后战术条件不变。
+func pointExposureRegressionHistory(leader: PlayerPosition) -> [Trick] {
+    var first = Trick(leadPosition: leader)
+    first.plays = [
+        (position: seat(after: leader, offset: 0), cards: [c(.spades, .ace)]),
+        (position: seat(after: leader, offset: 1), cards: [c(.spades, .four)]),
+        (position: seat(after: leader, offset: 2), cards: [c(.spades, .ten)]),
+        (position: seat(after: leader, offset: 3), cards: [c(.spades, .three)])
+    ]
+
+    var second = Trick(leadPosition: leader)
+    second.plays = [
+        (position: seat(after: leader, offset: 0), cards: [c(.spades, .jack), c(.spades, .jack)]),
+        (position: seat(after: leader, offset: 1), cards: [c(.spades, .eight), c(.spades, .eight)]),
+        (position: seat(after: leader, offset: 2), cards: [c(.spades, .five), c(.spades, .five)]),
+        (position: seat(after: leader, offset: 3), cards: [c(.spades, .six), c(.spades, .seven)])
+    ]
+    return [first, second]
+}
+
+func pointExposureRegressionPlays(
+    leader: PlayerPosition,
+    playsBeforeDecision: Int
+) -> [(PlayerPosition, [Card])] {
+    let ranks: [Rank] = [.three, .six]
+    return (0..<playsBeforeDecision).map { offset in
+        (seat(after: leader, offset: offset), [c(.diamonds, ranks[offset])])
+    }
+}
+
+/// 决策者在第 3 墩出牌前应有 22 张；出完 1 张后与截图的 21 张一致。
+func pointExposureRegressionHand(pointRank: Rank, safeTrump: Card? = c(.diamonds, .four)) -> [Card] {
+    var hand = [c(.diamonds, pointRank)]
+    if let safeTrump { hand.append(safeTrump) }
+    let sideRanks: [Rank] = [.three, .four, .five, .six, .seven, .eight,
+                             .nine, .ten, .jack, .queen, .king, .ace]
+    let sideCards = sideRanks.map { c(.hearts, $0) } + sideRanks.map { c(.clubs, $0) }
+    hand += sideCards.prefix(22 - hand.count)
+    return hand
+}
+
+func controlTrumpRegressionHand() -> [Card] {
+    var hand = [
+        c(.diamonds, .ace), c(.diamonds, .four),
+        c(.hearts, .ace), c(.clubs, .ace), c(.spades, .ace),
+        c(.hearts, .king), c(.hearts, .king),
+        c(.clubs, .queen), c(.clubs, .queen),
+        c(.spades, .jack), c(.spades, .jack)
+    ]
+    let fillers = [Rank.three, .four, .six, .seven, .eight, .nine]
+        .flatMap { [c(.hearts, $0), c(.clubs, $0)] }
+    hand += fillers.prefix(22 - hand.count)
+    return hand
+}
+
 var failures: [String] = []
 func check(_ cond: Bool, _ name: String, _ detail: @autoclosure () -> String = "") {
     if cond { print("✅ \(name)") }
@@ -77,7 +136,7 @@ let tr: Rank = .two
 let eval = TrickEvaluator(trumpSuit: ts, trumpRank: tr)
 let win10 = c(.spades, .ten)   // 当前对手领先牌（♠10，10 分）
 
-// ── Test 1：当前墩有分，对手领先，AI(北=P3) 有主A可压 → 应压过而非垫小牌 ──
+// ── Test 1：当前墩有分，对手领先，AI 有主A可压 → 应压过而非垫小牌 ──
 do {
     let s = makeState(trump: ts, rank: tr)
     setTrick(s, lead: .south,
@@ -148,57 +207,117 @@ do {
           "chosen=\(chosen.map { $0.shortDisplay })")
 }
 
-// ── Test 2a：P2 跟吊主，后手还有未知对手，0 分墩不裸送主分牌 ──
+// ── Test 2a.0：任意座次领吊主，对手牌力未知时不裸送主分牌 ──
 do {
-    let s = makeState(trump: ts, rank: tr)
-    setTrick(s, lead: .west,
-             plays: [(.west, [c(.spades, .seven)])],
-             turn: .north)
-    s.players[PlayerPosition.north.rawValue].hand =
-        [c(.spades, .ten), c(.spades, .three),
-         c(.hearts, .ace), c(.clubs, .ace), c(.diamonds, .ace),
-         c(.hearts, .king), c(.clubs, .king), c(.diamonds, .king),
-         c(.hearts, .queen), c(.clubs, .queen), c(.diamonds, .queen)]
-    let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
-    check(chosen.count == 1 && chosen[0].pointValue == 0 && chosen[0].rank == .three,
-          "Test2a P2吊主未知0分墩不裸送主分牌",
-          "chosen=\(chosen.map { $0.shortDisplay })")
+    for position in PlayerPosition.allCases {
+        let s = makeState(trump: ts, rank: tr)
+        s.currentTrick = Trick(leadPosition: position)
+        s.currentLeader = position
+        s.currentTurn = position
+        s.players[position.rawValue].hand =
+            [c(.spades, .king), c(.spades, .three), c(.spades, .four),
+             c(.spades, .six), c(.spades, .seven), c(.spades, .eight),
+             c(.spades, .nine), c(.hearts, .two)]
+        let chosen = AIPlayer.chooseCards(position: position, state: s, evaluator: eval)
+        check(chosen.count == 1 && chosen[0].pointValue == 0,
+              "Test2a.0 任意座次领吊主不裸送主分牌",
+              "seat=\(position.seatName), chosen=\(chosen.map { $0.shortDisplay })")
+    }
 }
 
-// ── Test 2a.0a：P2 跟吊主限制的是分牌暴露，不是大主强度；高主动权需求可用无分主A抢出牌权 ──
+// ── Test 2a：只要后手还有未知对手，有合法 0 分主时就不裸出主 10/K ──
 do {
-    let s = makeState(trump: ts, rank: tr)
-    setTrick(s, lead: .west,
-             plays: [(.west, [c(.spades, .seven)])],
-             turn: .north)
-    s.players[PlayerPosition.north.rawValue].hand =
-        [c(.spades, .ace), c(.spades, .three),
-         c(.hearts, .ace), c(.clubs, .ace), c(.diamonds, .ace),
-         c(.hearts, .king), c(.hearts, .king),
-         c(.clubs, .queen), c(.clubs, .queen),
-         c(.diamonds, .jack), c(.diamonds, .jack)]
-    let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
-    check(chosen.map { $0.shortDisplay } == ["♠A"],
-          "Test2a.0a P2高主动权需求可用无分控制主抢出牌权",
-          "chosen=\(chosen.map { $0.shortDisplay })")
+    let screenshotTrump: Suit? = .diamonds
+    let screenshotEval = TrickEvaluator(trumpSuit: screenshotTrump, trumpRank: tr)
+    for leader in PlayerPosition.allCases {
+        for playsBeforeDecision in 1...2 {
+            let position = seat(after: leader, offset: playsBeforeDecision)
+            for pointRank in [Rank.ten, .king] {
+                let s = makeState(trump: screenshotTrump, rank: tr)
+                s.completedTricks = pointExposureRegressionHistory(leader: leader)
+                setTrick(
+                    s,
+                    lead: leader,
+                    plays: pointExposureRegressionPlays(
+                        leader: leader,
+                        playsBeforeDecision: playsBeforeDecision
+                    ),
+                    turn: position
+                )
+                let safeTrump = c(.diamonds, .four)
+                let hand = pointExposureRegressionHand(pointRank: pointRank, safeTrump: safeTrump)
+                s.players[position.rawValue].hand = hand
+                let alternativeIsLegal = screenshotEval.isValidPlay(
+                    selected: [safeTrump], hand: hand, leadCards: s.currentTrick.leadCards!
+                )
+                let chosen = AIPlayer.chooseCards(position: position, state: s, evaluator: screenshotEval)
+                check(alternativeIsLegal && chosen.count == 1 && chosen[0].pointValue == 0,
+                      "Test2a 后手有未知对手时不裸出主10/K",
+                      "leader=\(leader.seatName), playsBefore=\(playsBeforeDecision), point=\(pointRank), chosen=\(chosen.map { $0.shortDisplay })")
+            }
+        }
+    }
 }
 
-// ── Test 2a.0b：同样需要主动权时，主K仍因 Point Exposure 被压下去 ──
+// ── Test 2a.0a：限制的是分牌暴露，无分控制主仍可争取主动权 ──
 do {
-    let s = makeState(trump: ts, rank: tr)
-    setTrick(s, lead: .west,
-             plays: [(.west, [c(.spades, .seven)])],
-             turn: .north)
-    s.players[PlayerPosition.north.rawValue].hand =
-        [c(.spades, .king), c(.spades, .three),
-         c(.hearts, .ace), c(.clubs, .ace), c(.diamonds, .ace),
-         c(.hearts, .king), c(.hearts, .king),
-         c(.clubs, .queen), c(.clubs, .queen),
-         c(.diamonds, .jack), c(.diamonds, .jack)]
-    let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
-    check(chosen.map { $0.shortDisplay } == ["♠3"],
-          "Test2a.0b P2不把主K送进后手对手可能赢的0分墩",
-          "chosen=\(chosen.map { $0.shortDisplay })")
+    let screenshotTrump: Suit? = .diamonds
+    let screenshotEval = TrickEvaluator(trumpSuit: screenshotTrump, trumpRank: tr)
+    for leader in PlayerPosition.allCases {
+        for playsBeforeDecision in 1...2 {
+            let position = seat(after: leader, offset: playsBeforeDecision)
+            let s = makeState(trump: screenshotTrump, rank: tr)
+            s.completedTricks = pointExposureRegressionHistory(leader: leader)
+            setTrick(
+                s,
+                lead: leader,
+                plays: pointExposureRegressionPlays(
+                    leader: leader,
+                    playsBeforeDecision: playsBeforeDecision
+                ),
+                turn: position
+            )
+            let hand = controlTrumpRegressionHand()
+            s.players[position.rawValue].hand = hand
+            let chosen = AIPlayer.chooseCards(position: position, state: s, evaluator: screenshotEval)
+            let expected = playsBeforeDecision == 2
+                ? chosen.map { $0.shortDisplay } == ["♦A"]
+                : chosen.count == 1 && chosen[0].pointValue == 0
+            check(expected,
+                  "Test2a.0a 按后续队友/对手关系决定是否用无分控制主接管",
+                  "leader=\(leader.seatName), playsBefore=\(playsBeforeDecision), chosen=\(chosen.map { $0.shortDisplay })")
+        }
+    }
+}
+
+// ── Test 2a.0b：没有 0 分主替代时，任意座次都必须遵守跟主规则 ──
+do {
+    let screenshotTrump: Suit? = .diamonds
+    let screenshotEval = TrickEvaluator(trumpSuit: screenshotTrump, trumpRank: tr)
+    for leader in PlayerPosition.allCases {
+        for playsBeforeDecision in 1...2 {
+            let position = seat(after: leader, offset: playsBeforeDecision)
+            for pointRank in [Rank.ten, .king] {
+                let s = makeState(trump: screenshotTrump, rank: tr)
+                s.completedTricks = pointExposureRegressionHistory(leader: leader)
+                setTrick(
+                    s,
+                    lead: leader,
+                    plays: pointExposureRegressionPlays(
+                        leader: leader,
+                        playsBeforeDecision: playsBeforeDecision
+                    ),
+                    turn: position
+                )
+                s.players[position.rawValue].hand =
+                    pointExposureRegressionHand(pointRank: pointRank, safeTrump: nil)
+                let chosen = AIPlayer.chooseCards(position: position, state: s, evaluator: screenshotEval)
+                check(chosen.count == 1 && chosen[0].rank == pointRank,
+                      "Test2a.0b 无0分主替代时必须跟出主分牌",
+                      "leader=\(leader.seatName), playsBefore=\(playsBeforeDecision), point=\(pointRank), chosen=\(chosen.map { $0.shortDisplay })")
+            }
+        }
+    }
 }
 
 // ── Test 2a.1：开局主牌多也不直接领对王 ──
@@ -1203,7 +1322,7 @@ do {
     )
 }
 
-// ── Test 17：P2/P3 已知后手对手也绝门时，只用主A/级牌竞争 ──
+// ── Test 17：已知后手对手也绝门时，只用主A/级牌竞争 ──
 do {
     func playerVoidHeartsTrick(_ voidPosition: PlayerPosition) -> Trick {
         var trick = Trick(leadPosition: .south)
@@ -1222,29 +1341,29 @@ do {
         return trick
     }
 
-    let p2Strong = makeState(trump: ts, rank: tr)
-    p2Strong.completedTricks = [playerVoidHeartsTrick(.north)]
+    let teammateStillActsStrong = makeState(trump: ts, rank: tr)
+    teammateStillActsStrong.completedTricks = [playerVoidHeartsTrick(.north)]
     setTrick(
-        p2Strong,
+        teammateStillActsStrong,
         lead: .south,
         plays: [(.south, [c(.hearts, .king)])],
         turn: .west
     )
-    p2Strong.players[PlayerPosition.west.rawValue].hand = [
+    teammateStillActsStrong.players[PlayerPosition.west.rawValue].hand = [
         c(.spades, .ace), c(.clubs, .two), c(.spades, .ten),
         c(nil, .smallJoker), c(.diamonds, .three)
     ]
-    let p2StrongChosen = AIPlayer.chooseCards(position: .west, state: p2Strong, evaluator: eval)
+    let teammateStillActsStrongChosen = AIPlayer.chooseCards(position: .west, state: teammateStillActsStrong, evaluator: eval)
     check(
-        p2StrongChosen.map(\.shortDisplay) == ["♠A"],
-        "Test17a P2用最小可赢主A/级牌竞争，不用主分或王",
-        "chosen=\(p2StrongChosen.map(\.shortDisplay))"
+        teammateStillActsStrongChosen.map(\.shortDisplay) == ["♠A"],
+        "Test17a 后面还有队友时用最小可赢主A/级牌竞争",
+        "chosen=\(teammateStillActsStrongChosen.map(\.shortDisplay))"
     )
 
-    let p3Strong = makeState(trump: ts, rank: tr)
-    p3Strong.completedTricks = [playerVoidHeartsTrick(.east)]
+    let noLaterTeammateStrong = makeState(trump: ts, rank: tr)
+    noLaterTeammateStrong.completedTricks = [playerVoidHeartsTrick(.east)]
     setTrick(
-        p3Strong,
+        noLaterTeammateStrong,
         lead: .south,
         plays: [
             (.south, [c(.hearts, .five)]),
@@ -1252,39 +1371,39 @@ do {
         ],
         turn: .north
     )
-    p3Strong.players[PlayerPosition.north.rawValue].hand = [
+    noLaterTeammateStrong.players[PlayerPosition.north.rawValue].hand = [
         c(.clubs, .two), c(.spades, .ten),
         c(nil, .bigJoker), c(.diamonds, .three)
     ]
-    let p3StrongChosen = AIPlayer.chooseCards(position: .north, state: p3Strong, evaluator: eval)
+    let noLaterTeammateStrongChosen = AIPlayer.chooseCards(position: .north, state: noLaterTeammateStrong, evaluator: eval)
     check(
-        p3StrongChosen.map(\.shortDisplay) == ["♣2"],
-        "Test17b P3有级牌时用级牌竞争，不用主分或王",
-        "chosen=\(p3StrongChosen.map(\.shortDisplay))"
+        noLaterTeammateStrongChosen.map(\.shortDisplay) == ["♣2"],
+        "Test17b 本队已无后手时有级牌则用级牌竞争",
+        "chosen=\(noLaterTeammateStrongChosen.map(\.shortDisplay))"
     )
 
-    let p2Weak = makeState(trump: ts, rank: tr)
-    p2Weak.completedTricks = [playerVoidHeartsTrick(.north)]
+    let teammateStillActsWeak = makeState(trump: ts, rank: tr)
+    teammateStillActsWeak.completedTricks = [playerVoidHeartsTrick(.north)]
     setTrick(
-        p2Weak,
+        teammateStillActsWeak,
         lead: .south,
         plays: [(.south, [c(.hearts, .king)])],
         turn: .west
     )
-    p2Weak.players[PlayerPosition.west.rawValue].hand = [
+    teammateStillActsWeak.players[PlayerPosition.west.rawValue].hand = [
         c(.spades, .ten), c(.spades, .five), c(.diamonds, .three)
     ]
-    let p2WeakChosen = AIPlayer.chooseCards(position: .west, state: p2Weak, evaluator: eval)
+    let teammateStillActsWeakChosen = AIPlayer.chooseCards(position: .west, state: teammateStillActsWeak, evaluator: eval)
     check(
-        p2WeakChosen.map(\.shortDisplay) == ["♦3"],
-        "Test17c P2只有弱主/主分时垫0分副牌",
-        "chosen=\(p2WeakChosen.map(\.shortDisplay))"
+        teammateStillActsWeakChosen.map(\.shortDisplay) == ["♦3"],
+        "Test17c 后面还有队友且只有弱主/主分时垫0分副牌",
+        "chosen=\(teammateStillActsWeakChosen.map(\.shortDisplay))"
     )
 
-    let p3Jokers = makeState(trump: ts, rank: tr)
-    p3Jokers.completedTricks = [playerVoidHeartsTrick(.east)]
+    let noLaterTeammateJokers = makeState(trump: ts, rank: tr)
+    noLaterTeammateJokers.completedTricks = [playerVoidHeartsTrick(.east)]
     setTrick(
-        p3Jokers,
+        noLaterTeammateJokers,
         lead: .south,
         plays: [
             (.south, [c(.hearts, .five)]),
@@ -1292,15 +1411,15 @@ do {
         ],
         turn: .north
     )
-    p3Jokers.players[PlayerPosition.north.rawValue].hand = [
+    noLaterTeammateJokers.players[PlayerPosition.north.rawValue].hand = [
         c(nil, .bigJoker), c(nil, .smallJoker),
         c(.spades, .ten), c(.diamonds, .three)
     ]
-    let p3JokersChosen = AIPlayer.chooseCards(position: .north, state: p3Jokers, evaluator: eval)
+    let noLaterTeammateJokersChosen = AIPlayer.chooseCards(position: .north, state: noLaterTeammateJokers, evaluator: eval)
     check(
-        p3JokersChosen.map(\.shortDisplay) == ["♦3"],
-        "Test17d P3该类竞争不动大小王，改垫0分副牌",
-        "chosen=\(p3JokersChosen.map(\.shortDisplay))"
+        noLaterTeammateJokersChosen.map(\.shortDisplay) == ["♦3"],
+        "Test17d 本队已无后手时也不用大小王作无效竞争",
+        "chosen=\(noLaterTeammateJokersChosen.map(\.shortDisplay))"
     )
 }
 

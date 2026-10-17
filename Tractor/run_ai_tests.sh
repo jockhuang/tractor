@@ -8,6 +8,7 @@ SDK="$(xcrun --sdk macosx --show-sdk-path)"
 OUT="$(mktemp -d)/aitests"
 
 xcrun swiftc -D DEBUG -sdk "$SDK" -target arm64-apple-macos13 -o "$OUT" \
+    Tractor/App/Localization.swift \
     Tractor/Models/Card.swift \
     Tractor/Models/Player.swift \
     Tractor/Models/Deck.swift \
