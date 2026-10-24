@@ -1423,6 +1423,72 @@ do {
     )
 }
 
+// ── Test 18：无已知大牌/强结构时，普通副牌对子应优先于随机副牌小单 ──
+do {
+    let s = makeState(trump: ts, rank: tr)
+    s.currentTrick = Trick(leadPosition: .north)
+    s.currentLeader = .north
+    s.currentTurn = .north
+    s.players[PlayerPosition.north.rawValue].hand = [
+        c(.hearts, .seven), c(.hearts, .seven),
+        c(.hearts, .nine), c(.clubs, .three), c(.diamonds, .four)
+    ]
+
+    let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
+    check(
+        chosen.count == 2 && chosen.allSatisfy { $0.suit == .hearts && $0.rank == .seven },
+        "Test18 普通副牌对子优先于随机副牌小单",
+        "chosen=\(chosen.map(\.shortDisplay))"
+    )
+}
+
+// ── Test 19：开局无拖拉机/强对且可吊主时，不随机领副牌小单 ──
+do {
+    let s = makeState(trump: ts, rank: tr)
+    s.currentTrick = Trick(leadPosition: .north)
+    s.currentLeader = .north
+    s.currentTurn = .north
+    s.players[PlayerPosition.north.rawValue].hand = [
+        c(.spades, .three), c(.spades, .three),
+        c(.spades, .six), c(.spades, .six),
+        c(.spades, .nine), c(.spades, .nine),
+        c(.spades, .queen), c(.spades, .queen),
+        c(.hearts, .four), c(.hearts, .seven), c(.hearts, .eight), c(.hearts, .nine)
+    ]
+
+    let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
+    check(
+        chosen.count == 2 && chosen.allSatisfy { CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr) },
+        "Test19 开局空档优先吊主而非随机副牌小单",
+        "chosen=\(chosen.map(\.shortDisplay))"
+    )
+}
+
+// ── Test 20：副牌对子不按分牌分档，只按牌面大小连续排序 ──
+do {
+    check(
+        !AIPlayer.isLeadStrongPair(c(.hearts, .king), ts: ts, tr: tr)
+            && !AIPlayer.isLeadStrongPair(c(.hearts, .ten), ts: ts, tr: tr)
+            && !AIPlayer.isLeadStrongPair(c(.hearts, .five), ts: ts, tr: tr),
+        "Test20a K/10/5副牌对不因带分自动算强对"
+    )
+
+    let orderedRanks: [Rank] = [.five, .ten, .jack, .queen, .king]
+    let adjustments = orderedRanks.map { rank in
+        let pair = [c(.hearts, rank), c(.hearts, rank)]
+        return AIPlayer.fallbackLeadShapeAdjustment(
+            AIPlayer.AIMove(cards: pair, kind: .bigPair),
+            ts: ts,
+            tr: tr
+        )
+    }
+    check(
+        zip(adjustments, adjustments.dropFirst()).allSatisfy(<),
+        "Test20b 普通副牌对子按牌面从小到大连续加权",
+        "adjustments=\(adjustments)"
+    )
+}
+
 print(String(repeating: "─", count: 40))
 if failures.isEmpty {
     print("ALL TESTS PASSED ✅")

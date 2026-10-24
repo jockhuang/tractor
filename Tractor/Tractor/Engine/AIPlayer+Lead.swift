@@ -390,6 +390,7 @@ extension AIPlayer {
                 + leadInitiativeValue(hand: remaining, position: position, state: state, ctx: ctx, security: max(security, 0.55)) * 80
                 + partnerDumpLeadValue(cards, position: position, tr: tr, ctx: ctx) * 35
                 + idleTrumpTransferValue(move, hand: hand, ts: ts, tr: tr)
+                + fallbackLeadShapeAdjustment(move, ts: ts, tr: tr)
                 - points * 2
             // Asset Lifecycle: pull trump to unlock side-suit winners awaiting it (pull first, realize later).
             if isTrumpLead(move, ts: ts, tr: tr) {
@@ -398,11 +399,17 @@ extension AIPlayer {
             base = s
         case .weakDisposal:
             let breakCost = structureFragmentationCost(cards, hand: hand, ts: ts, tr: tr)
+            let isSidePair = cards.count == 2
+                && cards.allSatisfy { !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr) }
+                && pairRepresentative(of: cards, trumpSuit: ts, trumpRank: tr) != nil
             base = 40
-                - points * 6
+                // 普通副牌对子只按牌力排序，不因 5/10/K 的牌面分值单独升降级；
+                // 实际送分风险仍由蒙特卡洛的墩分结果负责。
+                - (isSidePair ? 0 : points * 6)
                 - breakCost * 45
                 - Double(cards.count - 1) * 8
                 + (clearsSideSuitForLead(cards, hand: hand, ts: ts, tr: tr) ? 15 : 0)
+                + fallbackLeadShapeAdjustment(move, ts: ts, tr: tr)
         }
         return base + endgameAdjustment
     }
@@ -1087,6 +1094,26 @@ extension AIPlayer {
     }
 
 
+    /// 无兑现资产时的兜底牌型微调：普通副牌对子仍有逼出对方对子、争取牌权的价值，
+    /// 并只按对子本身的牌力连续排序，不把 5/10/K 作为特殊档位；
+    /// 随机副牌小单则略降权，避免它在空档期压过吊主或一个完整对子。
+    /// 拖拉机和强对子已在更高资产层处理，不会进入这里竞争。
+    static func fallbackLeadShapeAdjustment(_ move: AIMove, ts: Suit?, tr: Rank) -> Double {
+        guard !move.cards.isEmpty,
+              move.cards.allSatisfy({ !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr) }) else {
+            return 0
+        }
+        if move.cards.count == 2,
+           let rep = pairRepresentative(of: move.cards, trumpSuit: ts, trumpRank: tr) {
+            return 12 + Double(rep.rank.rawValue)
+        }
+        if move.kind == .weak, move.cards.count == 1 {
+            return -10
+        }
+        return 0
+    }
+
+
     static func clearsSideSuitForLead(_ cards: [Card], hand: [Card], ts: Suit?, tr: Rank) -> Bool {
         guard let first = cards.first,
               !CardComparator.isTrump(first, trumpSuit: ts, trumpRank: tr),
@@ -1444,7 +1471,8 @@ extension AIPlayer {
     // MARK: - Lead Strong Pair Assets
 
     /// 先手「强对子」分级。非强对子返回 (0, 0)。
-    /// 强对子定义：A对 / 级牌对 / 王对 / K对 / 10对 / 含分牌对子(5) / 主牌强对子。
+    /// 强对子只由控制力定义：A对 / 级牌对 / 王对 / 高主对子。
+    /// 副牌 K/10/5 不再因带分自动晋级；若已知最大，会由兑现赢家路径提升。
     static func leadStrongPairWeights(_ rep: Card, ts: Suit?, tr: Rank)
         -> (breakPenalty: Double, leadBonus: Double) {
         // 顶级：王对 / 级牌对 / A对
@@ -1457,10 +1485,6 @@ extension AIPlayer {
             || CardComparator.trumpWeight(rep, trumpSuit: ts, trumpRank: tr) >= Rank.king.rawValue {
             return (120, 50)
         }
-        // K对 / 10对（注意：必须在「含分对子」之前判断，K/10 本身也是分牌）
-        if rep.rank == .king || rep.rank == .ten { return (100, 40) }
-        // 其他含分对子（5对）→ 中等
-        if rep.pointValue > 0 { return (70, 30) }
         return (0, 0)
     }
 

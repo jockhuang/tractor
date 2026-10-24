@@ -162,7 +162,7 @@ AI 已不再走单一固定优先级表。无论先手还是跟牌，都走同�
 
 1. **Cashing Time-Sensitive Winners**：旁门 A、已知最大副牌单张、已知最大副牌对子、安全旁门控制组。它们会随敌方绝门而贬值，应尽早兑现。
 2. **Safe Slam / Control Groups**：安全甩牌或完整控制组，按整体评估；若存在 AKK / AAKK 这类组合，会压制其子走法，避免拆成 A、KK、AA、KK 分别比较。
-3. **Strong Structures**：拖拉机、级牌对、王对、强主对、强副牌对。它们是稳定控制资产，优先作为结构使用。
+3. **Strong Structures**：拖拉机、级牌对、王对、强主对。它们是稳定控制资产，优先作为结构使用。
 4. **Initiative Building**：没有更高价值资产需要兑现时，才考虑队友垫分计划、长门发展、受控吊主、小主过渡。
 5. **Weak Disposal**：弱单、弱对、低价值清理。只有更高层资产都不存在时才进入选择。
 
@@ -172,12 +172,12 @@ AI 已不再走单一固定优先级表。无论先手还是跟牌，都走同�
 | `findSlamLeadCandidates` | 无法被压制的甩牌 / 控制组；安全组合会压制其子走法 |
 | `findAbsoluteSideWinnerLeadCandidates` | 时效性副牌赢家：旁门 A、已知最大副牌单张、已知最大副牌对子；若属于安全控制组则不单独出 |
 | `findTractorLeadCandidates` | 强结构层候选：所有逻辑花色中的合法拖拉机，跳过敌方已全绝的副花色 |
-| `findStrongPairLeadCandidates` | 强结构层候选：A/级牌/王对子、强主对、K/10 对、分牌对子；大主对子会先过 `bigTrumpPairLeadAllowed` 保护 |
+| `findStrongPairLeadCandidates` | 强结构层候选：A/级牌/王对子与高主对；K/10/5 副牌对不因带分自动晋级，已知最大副牌对由兑现赢家路径处理；大主对子会先过 `bigTrumpPairLeadAllowed` 保护 |
 | `findNoTrumpControlLeadCandidates` | 无主局中的王/级牌/A 控制对子与连对；大主控制对子同样会先过 `bigTrumpPairLeadAllowed` |
 | `findPartnerDumpLeadCandidates` | 主动权建设：队友已绝且仍有未出分牌的花色——领出让队友垫分 |
 | `findLongSuitDevelopmentLeadCandidates` | 主动权建设：无兑现资产时发展长门 |
 | `findTrumpLeadCandidates` / `findTrumpTransferLeadCandidates` | 主动权建设：受控吊主或低成本小主过渡；主牌不套用旁门兑现紧迫性。小主过渡门槛为主牌 ≥3 且不拆结构 |
-| `findWeakLeadCandidates` / `findWeakPairDisposalLeadCandidates` | 弱处置层：弱单、弱对、低价值清理 |
+| `findWeakLeadCandidates` / `findWeakPairDisposalLeadCandidates` | 弱处置层：弱单、普通副牌对子、低价值清理；普通副牌对子不按分牌分档，只按牌面大小连续加权 |
 
 `selectLeadAssetPool` 只取当前存在的最高资产层级进入 Monte Carlo。这样旁门 A 不会再被普通对子挤掉，AKK / AAKK 不会被拆成局部候选互相比较，普通对子只在弱处置层参与。Tier 4 内部若没有队友垫分计划且存在合法小主过渡，只让小主过渡进入模拟，避免空档期随手领弱副牌。
 
