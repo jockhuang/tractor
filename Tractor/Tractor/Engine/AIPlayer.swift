@@ -61,6 +61,23 @@ struct AIContext {
 
     // MARK: Helpers
 
+    func observing(_ trick: Trick, ts: Suit?, tr: Rank) -> AIContext {
+        var seen = Set<UUID>()
+        let played = (playedCards + trick.plays.flatMap(\.cards)).filter { seen.insert($0.id).inserted }
+        var voids = voidSuits
+        if let lead = trick.leadCards, let first = lead.first {
+            let key = Self.suitKey(first, ts: ts, tr: tr)
+            for play in trick.plays.dropFirst() {
+                if play.cards.filter({ Self.suitKey($0, ts: ts, tr: tr) == key }).count < lead.count {
+                    voids[play.position, default: []].insert(key)
+                }
+            }
+        }
+        let revealed = knownCardsByPlayer.mapValues { $0.filter { !seen.contains($0.id) } }
+        return AIContext(playedCards: played, knownCards: played + revealed.values.flatMap { $0 },
+                         knownCardsByPlayer: revealed, voidSuits: voids, isLastPlayer: trick.plays.count == 4)
+    }
+
     /// 逻辑花色 key：主牌 → "TRUMP"，副牌 → suit.rawValue
     static func suitKey(_ card: Card, ts: Suit?, tr: Rank) -> String {
         CardComparator.isTrump(card, trumpSuit: ts, trumpRank: tr)
@@ -219,6 +236,10 @@ struct TrickContext {
 
 struct AIPlayer {
 
+    // 只作牌面计数/隐藏世界模板，避免评估每个候选时反复生成108个UUID。
+    // 真实发牌仍由Deck生成独立实例，绝不复用此模板作为玩家手牌。
+    static let referenceDeck = Deck.doubleDeck()
+
     struct TractorInfo {
         let pairCount: Int
         let highCard: Card
@@ -268,8 +289,15 @@ struct AIPlayer {
         case cashingWinner = 1
         case safeControlGroup = 2
         case strongStructure = 3
-        case initiativeBuilder = 4
-        case weakDisposal = 5
+        case sidePairOpportunity = 4
+        case initiativeBuilder = 5
+        case weakDisposal = 6
+    }
+
+    enum LeadControlPlan {
+        case seekPartnerLead
+        case pullForSideWinners
+        case reassessSideAssets
     }
 
     struct LeadAsset {
@@ -320,6 +348,7 @@ struct AIPlayer {
         state: GameState,
         evaluator: TrickEvaluator
     ) -> [Card] {
+        let state = state.aiObservation(for: position)
         let hand = state.player(position).hand
         guard !hand.isEmpty else { return [] }
 

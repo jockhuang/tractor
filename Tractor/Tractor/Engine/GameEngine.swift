@@ -966,6 +966,10 @@ class GameEngine: ObservableObject {
                 syncMultiplayerState()
                 return
             }
+        } else if !makeEvaluator().isValidLead(cards) {
+            state.message = L10n.text("game.message.invalid_play")
+            syncMultiplayerState()
+            return
         }
 
         isPlayInProgress = true

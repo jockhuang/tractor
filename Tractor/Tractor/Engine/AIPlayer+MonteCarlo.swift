@@ -37,10 +37,21 @@ extension AIPlayer {
 
         var bestMove: AIMove?
         var bestScore = -Double.infinity
+        let samplingMemo = HiddenSamplingMemo()
+        let context = AIContext.build(state: state, ts: state.trumpSuit, tr: state.trumpRank)
+
+        // 所有候选共用同一组合法世界，结构约束拒绝抽样只做一次。
+        let worlds = (0..<monteCarloSimulationCount).compactMap { simulation -> [PlayerPosition: [Card]]? in
+            var rng = MonteCarloRNG(seed: monteCarloSeed(position: position, state: state, simulation: simulation))
+            let hands = sampleHiddenHands(currentPosition: position, currentHand: hand,
+                playedCandidate: [], state: state, rng: &rng, maximumAttempts: 16, memo: samplingMemo)
+            return hands.isEmpty ? nil : hands
+        }
+        guard !worlds.isEmpty else { return moves.max { heuristicScore($0) < heuristicScore($1) } }
 
         for move in moves {
             var total = 0.0
-            for simulation in 0..<monteCarloSimulationCount {
+            for (simulation, world) in worlds.enumerated() {
                 var rng = MonteCarloRNG(seed: monteCarloSeed(
                     position: position,
                     state: state,
@@ -53,12 +64,14 @@ extension AIPlayer {
                     state: state,
                     evaluator: evaluator,
                     mode: mode,
-                    rng: &rng
+                    rng: &rng,
+                    sampledHands: world
                 )
             }
 
-            let average = total / Double(monteCarloSimulationCount)
+            let average = total / Double(worlds.count)
             let score = average + heuristicScore(move) * 0.03
+                + fallbackTrumpTransferPreference(move, position: position, hand: hand, state: state, ctx: context)
             if score > bestScore {
                 bestScore = score
                 bestMove = move
@@ -90,23 +103,26 @@ extension AIPlayer {
         state: GameState,
         evaluator: TrickEvaluator,
         mode: TacticalMode = .normal,
-        rng: inout MonteCarloRNG
+        rng: inout MonteCarloRNG,
+        sampledHands: [PlayerPosition: [Card]]? = nil
     ) -> Double {
         // 守分 / 抢分 / 逼牌前，记录我方出手前的当前赢家（用于"阻止对手得分"判定）
         let opponentWinningBefore = !state.currentTrick.plays.isEmpty
             && evaluator.winner(of: state.currentTrick).team != position.team
+        let baseContext = AIContext.build(state: state, ts: state.trumpSuit, tr: state.trumpRank)
 
         var trick = state.currentTrick
         guard !trick.plays.contains(where: { $0.position == position }) else { return -1000 }
         trick.plays.append((position: position, cards: candidate.cards))
 
-        var simulatedHands = sampleHiddenHands(
+        var simulatedHands = sampledHands ?? sampleHiddenHands(
             currentPosition: position,
             currentHand: hand,
             playedCandidate: candidate.cards,
             state: state,
             rng: &rng
         )
+        simulatedHands[position] = handAfterPlaying(candidate.cards, from: hand)
 
         var next = nextPosition(after: position)
         var safety = 0
@@ -121,10 +137,12 @@ extension AIPlayer {
             let play = monteCarloFollowCards(
                 hand: nextHand,
                 trick: trick,
+                position: next,
                 evaluator: evaluator,
                 ts: state.trumpSuit,
                 tr: state.trumpRank,
-                rng: &rng
+                rng: &rng,
+                context: baseContext.observing(trick, ts: state.trumpSuit, tr: state.trumpRank)
             )
             guard !play.isEmpty else { return -1000 }
             trick.plays.append((position: next, cards: play))
@@ -135,15 +153,30 @@ extension AIPlayer {
 
         guard trick.plays.count == 4 else { return -1000 }
         let winner = evaluator.winner(of: trick)
-        let points = trick.plays.flatMap(\.cards).reduce(0) { $0 + $1.pointValue }
+        var points = trick.plays.flatMap(\.cards).reduce(0) { $0 + $1.pointValue }
         let myTeamWon = winner.team == position.team
         let ownPoints = candidate.cards.reduce(0) { $0 + $1.pointValue }
         let remainingHand = handAfterPlaying(candidate.cards, from: hand)
+        if remainingHand.isEmpty && simulatedHands.values.allSatisfy({ $0.isEmpty }),
+           winner.team != state.dealerTeamIdx {
+            // 非庄家只能用本次抽样世界的剩余牌推导底牌，不能读取真实底牌。
+            let kitty: [Card]
+            if position == state.dealerPosition { kitty = state.kitty }
+            else {
+                let played = state.completedTricks.flatMap { $0.plays.flatMap(\.cards) }
+                    + trick.plays.flatMap(\.cards)
+                kitty = removeKnownFaces(from: referenceDeck, knownCards: played)
+            }
+            if kitty.count == 8 { points += kitty.reduce(0) { $0 + $1.pointValue } * 2 }
+        }
         let capturedPoints = myTeamWon ? Double(points) : -Double(points)
         let wonTrickValue = winner == position ? 1.0 : (myTeamWon ? 0.35 : -0.6)
-        let simContext = AIContext.build(state: state, ts: state.trumpSuit, tr: state.trumpRank)
-        let initiative = initiativeNeed(position: position, hand: remainingHand, state: state, ctx: simContext)
-        let assetValue = remainingAssetValue(position: position, hand: remainingHand, state: state, ctx: simContext)
+        let simContext = baseContext.observing(trick, ts: state.trumpSuit, tr: state.trumpRank)
+        let continuation = simulateContinuation(hands: simulatedHands, leader: winner,
+            position: position, state: state, context: simContext, rng: &rng)
+        let futureHand = continuation.hands[position] ?? remainingHand
+        let initiative = initiativeNeed(position: position, hand: futureHand, state: state, ctx: continuation.context)
+        let assetValue = remainingAssetValue(position: position, hand: futureHand, state: state, ctx: continuation.context)
         let earlyTrumpPenalty = usedBigTrumpEarlyPenalty(
             state: state,
             position: position,
@@ -157,6 +190,9 @@ extension AIPlayer {
         // 此时点数目标主导评分，资产 / 早出大主只作轻微 tie-breaker，
         // 避免 assetValue / usedBigTrumpEarlyPenalty 让 AI 为了"省大主"而丢掉有分的墩。
         if isPointContestMode(mode) {
+            let fragmentation = structureFragmentationCost(candidate.cards, hand: hand,
+                ts: state.trumpSuit, tr: state.trumpRank, ctx: baseContext)
+            let structureDamp = myTeamWon ? preservationDamp : 1.0
             return pointContestSimulationScore(
                 candidate: candidate,
                 trick: trick,
@@ -170,10 +206,10 @@ extension AIPlayer {
                 earlyTrumpPenalty: earlyTrumpPenalty,
                 ts: state.trumpSuit,
                 tr: state.trumpRank
-            )
+            ) - fragmentation * 2 * structureDamp + continuation.score / 8
         }
 
-        var score = capturedPoints * 8 * pressure
+        var score = capturedPoints * 8 * pressure + continuation.score
             + wonTrickValue * (points > 0 ? 1.0 : 0.6)
             + assetValue * preservationDamp
             + (myTeamWon ? initiative * 0.12 : -initiative * 0.18)
@@ -214,8 +250,125 @@ extension AIPlayer {
                 ctx: simContext,
                 security: myTeamWon ? 0.8 : 0.3
             ) * 2
+        } else if !state.currentTrick.plays.isEmpty {
+            // 跟牌同样支付当前拆结构成本。仅靠续演结束后的剩余资产，
+            // 会把“现在拆对”与“假想两墩后才拆对”视为相同，抹掉这次损耗。
+            // 与争分模式中的 fragmentation×2（分数单位）保持相同量级；
+            // 大分墩仍按压力衰减，允许为得分牺牲结构。
+            // 对手收走更多分不能成为廉价拆对的理由；仅在本队拿到收益的
+            // 世界中放宽成本，避免对手后手垫分把无效跟牌的损耗也打折。
+            let structureDamp = myTeamWon ? preservationDamp : 1.0
+            score -= structureFragmentationCost(candidate.cards, hand: hand,
+                ts: state.trumpSuit, tr: state.trumpRank, ctx: baseContext) * 16 * structureDamp
         }
         return score
+    }
+
+    struct ContinuationResult {
+        let score: Double
+        let hands: [PlayerPosition: [Card]]
+        let context: AIContext
+    }
+
+    /// 有限两墩续演：包含对家接手后领副牌、失去牌权后的回合及末墩底分。
+    /// 每位模拟玩家的选择只读自己的牌与公开记忆，不偷看抽样世界中别人的手牌。
+    static func simulateContinuation(
+        hands initialHands: [PlayerPosition: [Card]], leader initialLeader: PlayerPosition,
+        position: PlayerPosition, state: GameState, context initialContext: AIContext,
+        rng: inout MonteCarloRNG, depth: Int = 2
+    ) -> ContinuationResult {
+        var hands = initialHands
+        var leader = initialLeader
+        var context = initialContext
+        var score = 0.0
+        let evaluator = TrickEvaluator(trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
+        for step in 0..<max(0, depth) {
+            let counts = PlayerPosition.allCases.map { hands[$0]?.count ?? 0 }
+            // 稀疏测试局面不代表真实的后续手牌，不能凭空续演。
+            guard let count = counts.first, count > 0, counts.allSatisfy({ $0 == count }) else { break }
+            var trick = Trick(leadPosition: leader)
+            let lead = monteCarloLeadCards(hand: hands[leader] ?? [], position: leader,
+                context: context, ts: state.trumpSuit, tr: state.trumpRank)
+            guard evaluator.isValidLead(lead) else { break }
+            trick.plays.append((leader, lead))
+            hands[leader] = handAfterPlaying(lead, from: hands[leader] ?? [])
+            var next = nextPosition(after: leader)
+            for _ in 0..<3 {
+                let hand = hands[next] ?? []
+                let play = monteCarloFollowCards(hand: hand, trick: trick, position: next,
+                    evaluator: evaluator, ts: state.trumpSuit, tr: state.trumpRank, rng: &rng,
+                    context: context.observing(trick, ts: state.trumpSuit, tr: state.trumpRank))
+                guard evaluator.isValidPlay(selected: play, hand: hand, leadCards: lead) else {
+                    return ContinuationResult(score: score, hands: initialHands, context: initialContext)
+                }
+                trick.plays.append((next, play))
+                hands[next] = handAfterPlaying(play, from: hand)
+                next = nextPosition(after: next)
+            }
+            leader = evaluator.winner(of: trick)
+            context = context.observing(trick, ts: state.trumpSuit, tr: state.trumpRank)
+            var points = trick.plays.flatMap(\.cards).reduce(0) { $0 + $1.pointValue }
+            if hands.values.allSatisfy({ $0.isEmpty }), leader.team != state.dealerTeamIdx {
+                let kitty = position == state.dealerPosition ? state.kitty
+                    : removeKnownFaces(from: referenceDeck, knownCards: context.playedCards)
+                if kitty.count == 8 { points += kitty.reduce(0) { $0 + $1.pointValue } * 2 }
+            }
+            let discount = pow(0.65, Double(step + 1))
+            score += (leader.team == position.team ? 1 : -1)
+                * Double(points) * 8 * pointPressureBonus(totalPoints: points) * discount
+        }
+        return ContinuationResult(score: score, hands: hands, context: context)
+    }
+
+    static func monteCarloLeadCards(
+        hand: [Card], position: PlayerPosition, context: AIContext, ts: Suit?, tr: Rank
+    ) -> [Card] {
+        guard !hand.isEmpty else { return [] }
+        let paired = pairedCardIDs(in: hand, trumpSuit: ts, trumpRank: tr)
+        var options = hand.filter { !paired.contains($0.id) }.map { [$0] }
+        options += pairs(in: hand, trumpSuit: ts, trumpRank: tr)
+        for suit in Set(hand.map({ CardComparator.logicalSuit($0, trumpSuit: ts, trumpRank: tr) })) {
+            let suited = hand.filter { CardComparator.logicalSuit($0, trumpSuit: ts, trumpRank: tr) == suit }
+            let pairCount = pairs(in: suited, trumpSuit: ts, trumpRank: tr).count
+            if pairCount >= 2 {
+                for count in 2...pairCount { options += tractors(in: suited, pairCount: count, trumpSuit: ts, trumpRank: tr) }
+            }
+        }
+        options += findSlamLeadCandidates(in: hand, ts: ts, tr: tr, myTeam: position.team,
+            ctx: context, position: position)
+        let protected = options.filter { cards in
+            !(hand.count > 6 && cards.contains { isBigTrump($0, ts: ts, tr: tr) })
+        }
+        if !protected.isEmpty { options = protected }
+        func value(_ cards: [Card]) -> Double {
+            let first = cards[0]
+            let trump = CardComparator.isTrump(first, trumpSuit: ts, trumpRank: tr)
+            let points = Double(cards.reduce(0) { $0 + $1.pointValue })
+            let whole = wholeStructureControlValue(cards, hand: hand, ts: ts, tr: tr, ctx: context)
+            let knownWinner = trump
+                ? noUnknownHigherTrumpThan(maxCard(in: cards, ts: ts, tr: tr), hand: hand, ts: ts, tr: tr, ctx: context)
+                : (cards.count == 1 ? context.isEffectivelyBiggest(first, ts: ts, tr: tr, hand: hand)
+                    : isEffectivelyBiggestPair(maxCard(in: cards, ts: ts, tr: tr), hand: hand, ctx: context, ts: ts, tr: tr))
+            var score = whole * 22 + Double(cards.count) * 4
+                + (knownWinner ? 45 + points * 4 : -points * 2)
+                - structureFragmentationCost(cards, hand: hand, ts: ts, tr: tr) * 18
+            if trump {
+                score -= Double(cards.reduce(0) { $0 + cardStrength($1, ts: ts, tr: tr) }) * 0.18
+                if cards.count == 1 && !isBigTrump(first, ts: ts, tr: tr) {
+                    let partner = PlayerPosition(rawValue: (position.rawValue + 2) % 4)!
+                    if !context.isVoid(partner, key: "TRUMP") { score += 12 }
+                }
+            } else {
+                score += Double(first.rank.rawValue) * 0.7
+                score += clearsSideSuitForLead(cards, hand: hand, ts: ts, tr: tr) ? 10 : 0
+                let voids = context.voidEnemies(myTeam: position.team, key: first.suit!.rawValue)
+                    .filter { !context.isVoid($0, key: "TRUMP") }.count
+                score -= Double(voids) * (cards.count == 1 ? 40 : 24)
+            }
+            return score
+        }
+        return options.map { (cards: $0, value: value($0)) }.max { $0.value < $1.value }?.cards
+            ?? [hand.min { weakerCard($0, than: $1, trumpSuit: ts, trumpRank: tr) }!]
     }
 
 
@@ -280,7 +433,7 @@ extension AIPlayer {
             + opponentPointPrevented * 1.0
             + opponentCostForced * 0.3
             - overkill * 0.2
-            - assetValue * 0.05
+            + assetValue * 0.05
             - earlyTrumpPenalty * 0.05
 
         // 守分铁律：输墩时绝不往里送自己的分牌。
@@ -289,12 +442,81 @@ extension AIPlayer {
     }
 
 
+    struct PublicFollowConstraint {
+        let position: PlayerPosition
+        let lead: [Card]
+        let selected: [Card]
+        let laterCards: [Card]
+    }
+
+    /// 单次决策内复用条件分布的组合计数，不保存跨局或跨玩家的可变状态。
+    final class HiddenSamplingMemo {
+        var signature = ""
+        var ways: [String: Double] = [:]
+    }
+
+    static func publicFollowConstraints(state: GameState) -> [PublicFollowConstraint] {
+        let evaluator = TrickEvaluator(trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
+        var later: [PlayerPosition: [Card]] = [:]
+        var constraints: [PublicFollowConstraint] = []
+        for trick in (state.completedTricks + [state.currentTrick]).reversed() {
+            if let lead = trick.leadCards, lead.count > 1 {
+                for play in trick.plays.dropFirst() {
+                    // 完整跟上同型对子/拖拉机并未暴露结构短缺；其他情况用
+                    // 规则验证历史手牌，涵盖无对、连对不足、甩牌对子槽不足。
+                    let fullPair = isPairMove(lead, ts: state.trumpSuit, tr: state.trumpRank)
+                        && isPairMove(play.cards, ts: state.trumpSuit, tr: state.trumpRank)
+                    let fullTractor = tractorInfo(of: lead, trumpSuit: state.trumpSuit, trumpRank: state.trumpRank) != nil
+                        && tractorInfo(of: play.cards, trumpSuit: state.trumpSuit, trumpRank: state.trumpRank) != nil
+                    if !fullPair && !fullTractor,
+                       play.cards.filter({ evaluator.cardSuit($0) == evaluator.dominantSuit(of: lead) }).count == lead.count {
+                        constraints.append(PublicFollowConstraint(position: play.position,
+                            lead: lead, selected: play.cards, laterCards: later[play.position] ?? []))
+                    }
+                }
+            }
+            for play in trick.plays { later[play.position, default: []] += play.cards }
+        }
+        return constraints
+    }
+
+    static func respectsPublicFollowConstraints(
+        _ hands: [PlayerPosition: [Card]], constraints: [PublicFollowConstraint],
+        excluding position: PlayerPosition, evaluator: TrickEvaluator
+    ) -> Bool {
+        constraints.filter { $0.position != position }.allSatisfy { constraint in
+            evaluator.isValidPlay(selected: constraint.selected,
+                hand: (hands[constraint.position] ?? []) + constraint.laterCards + constraint.selected,
+                leadCards: constraint.lead)
+        }
+    }
+
     static func sampleHiddenHands(
+        currentPosition: PlayerPosition, currentHand: [Card], playedCandidate: [Card],
+        state: GameState, rng: inout MonteCarloRNG, maximumAttempts: Int = 128,
+        memo: HiddenSamplingMemo? = nil
+    ) -> [PlayerPosition: [Card]] {
+        let constraints = publicFollowConstraints(state: state)
+        let evaluator = TrickEvaluator(trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
+        let memo = memo ?? HiddenSamplingMemo()
+        for _ in 0..<(constraints.isEmpty ? 1 : max(1, maximumAttempts)) {
+            let hands = sampleVoidConstrainedHands(currentPosition: currentPosition,
+                currentHand: currentHand, playedCandidate: playedCandidate, state: state, rng: &rng, memo: memo)
+            if hands.isEmpty { return [:] }
+            if respectsPublicFollowConstraints(hands, constraints: constraints,
+                excluding: currentPosition, evaluator: evaluator) { return hands }
+        }
+        // 不伪造违反公开信息的世界；预算耗尽时由调用者使用启发式兜底。
+        return [:]
+    }
+
+    static func sampleVoidConstrainedHands(
         currentPosition: PlayerPosition,
         currentHand: [Card],
         playedCandidate: [Card],
         state: GameState,
-        rng: inout MonteCarloRNG
+        rng: inout MonteCarloRNG,
+        memo sharedMemo: HiddenSamplingMemo? = nil
     ) -> [PlayerPosition: [Card]] {
         let ts = state.trumpSuit
         let tr = state.trumpRank
@@ -319,7 +541,7 @@ extension AIPlayer {
             knownCards += state.kitty
         }
 
-        var unknownDeck = removeKnownFaces(from: Deck.doubleDeck(), knownCards: knownCards)
+        var unknownDeck = removeKnownFaces(from: referenceDeck, knownCards: knownCards)
 
         // 非庄家也能推断部分底牌：若其余三家都已绝某逻辑花色，
         // 则该花色所有未知牌只可能在底牌里，不应发给任何对手
@@ -345,13 +567,13 @@ extension AIPlayer {
 
         var need: [PlayerPosition: Int] = [:]
         for pos in others {
-            need[pos] = max(0, state.player(pos).hand.count - (hands[pos]?.count ?? 0))
+            need[pos] = max(0, state.handCount(for: pos) - (hands[pos]?.count ?? 0))
         }
 
         // 非庄家视角中未知池还包含底牌。把底牌作为一个有明确容量、可接收
         // 任意花色的合法接收方，而不是在玩家约束冲突时才临时丢牌。
         let totalPlayerNeed = need.values.reduce(0, +)
-        var kittyNeed = max(0, unknownDeck.count - totalPlayerNeed)
+        let kittyNeed = max(0, unknownDeck.count - totalPlayerNeed)
 
         // 绝门约束只依赖逻辑花色。按花色成组分配，把问题缩小成最多五组牌
         // 对三家手牌容量和底牌容量的整数分配；回溯保证不会为了终止而违约。
@@ -376,99 +598,108 @@ extension AIPlayer {
             suitGroups[index].cards.shuffle(using: &rng)
         }
 
-        func possibleDistributions(
-            cardCount: Int,
-            eligiblePlayers: [PlayerPosition],
-            kittyCapacity: Int
-        ) -> [[Int]] {
-            let recipientCount = eligiblePlayers.count + (kittyCapacity > 0 ? 1 : 0)
-            guard recipientCount > 0 else { return [] }
+        // 对每个“花色数量方案”按它对应的真实牌张排列数加权。
+        // 组合计数 + 后续可行完成数确保有绝门约束时仍是条件均匀抽样。
+        let initialCapacities = others.map { need[$0] ?? 0 } + [kittyNeed]
+        var factorial = [1.0]
+        for n in 1...108 { factorial.append(factorial[n - 1] * Double(n)) }
+        func choose(_ n: Int, _ k: Int) -> Double {
+            guard k >= 0 && k <= n else { return 0 }
+            return factorial[n] / factorial[k] / factorial[n - k]
+        }
+        let memo = sharedMemo ?? HiddenSamplingMemo()
+        let signature = initialCapacities.map(String.init).joined(separator: ",") + suitGroups.map { group in
+            group.key + ":\(group.cards.count):" + others.map {
+                (voids[$0]?.contains(group.key) ?? false) ? "0" : "1"
+            }.joined()
+        }.joined(separator: ";")
+        if memo.signature != signature { memo.signature = signature; memo.ways.removeAll(keepingCapacity: true) }
+        func distributions(_ group: Int, _ caps: [Int]) -> [[Int]] {
+            let eligible = others.map { !(voids[$0]?.contains(suitGroups[group].key) ?? false) } + [true]
             var result: [[Int]] = []
-            var current = Array(repeating: 0, count: recipientCount)
-
-            func build(_ recipientIndex: Int, _ remaining: Int) {
-                if recipientIndex == recipientCount {
-                    if remaining == 0 { result.append(current) }
+            var allocation = Array(repeating: 0, count: caps.count)
+            func build(_ seat: Int, _ left: Int) {
+                if seat == caps.count {
+                    if left == 0 { result.append(allocation) }
                     return
                 }
-
-                let isKitty = recipientIndex == eligiblePlayers.count
-                    && kittyCapacity > 0
-                let capacity = isKitty
-                    ? kittyCapacity
-                    : (need[eligiblePlayers[recipientIndex]] ?? 0)
-                let remainingCapacity = ((recipientIndex + 1)..<recipientCount).reduce(0) {
-                    partial, index in
-                    let indexIsKitty = index == eligiblePlayers.count
-                        && kittyCapacity > 0
-                    return partial + (indexIsKitty
-                        ? kittyCapacity
-                        : (need[eligiblePlayers[index]] ?? 0))
+                let maximum = eligible[seat] ? min(left, caps[seat]) : 0
+                let restCapacity = caps.indices.dropFirst(seat + 1).reduce(0) {
+                    $0 + (eligible[$1] ? caps[$1] : 0)
                 }
-                let minimum = max(0, remaining - remainingCapacity)
-                let maximum = min(capacity, remaining)
+                let minimum = max(0, left - restCapacity)
                 guard minimum <= maximum else { return }
                 for amount in minimum...maximum {
-                    current[recipientIndex] = amount
-                    build(recipientIndex + 1, remaining - amount)
+                    allocation[seat] = amount
+                    build(seat + 1, left - amount)
                 }
-                current[recipientIndex] = 0
             }
-
-            build(0, cardCount)
-            result.shuffle(using: &rng)
+            build(0, suitGroups[group].cards.count)
             return result
         }
-
-        func assignGroup(_ groupIndex: Int) -> Bool {
-            if groupIndex == suitGroups.count {
-                return others.allSatisfy { (need[$0] ?? 0) == 0 } && kittyNeed == 0
+        func ways(_ group: Int, _ caps: [Int]) -> Double {
+            if group == suitGroups.count { return caps.allSatisfy { $0 == 0 } ? 1 : 0 }
+            let key = "\(group):" + caps.map(String.init).joined(separator: ",")
+            if let cached = memo.ways[key] { return cached }
+            // 剩下花色都不受约束时，用多项式系数直接结算，避免展开无约束状态。
+            let unrestricted = suitGroups[group...].allSatisfy { item in
+                others.indices.allSatisfy { caps[$0] == 0 || !(voids[others[$0]]?.contains(item.key) ?? false) }
             }
-
-            let group = suitGroups[groupIndex]
-            let eligiblePlayers = others.filter {
-                (need[$0] ?? 0) > 0 && !(voids[$0]?.contains(group.key) ?? false)
+            if unrestricted {
+                let remaining = suitGroups[group...].reduce(0) { $0 + $1.cards.count }
+                guard remaining == caps.reduce(0, +) else { return 0 }
+                let result = suitGroups[group...].reduce(factorial[remaining]) { $0 / factorial[$1.cards.count] }
+                memo.ways[key] = result
+                return result
             }
-            let distributions = possibleDistributions(
-                cardCount: group.cards.count,
-                eligiblePlayers: eligiblePlayers,
-                kittyCapacity: kittyNeed
-            )
-
-            for distribution in distributions {
-                var cursor = 0
-                for (index, player) in eligiblePlayers.enumerated() {
-                    let amount = distribution[index]
-                    if amount > 0 {
-                        hands[player, default: []].append(
-                            contentsOf: group.cards[cursor..<(cursor + amount)]
-                        )
-                        need[player, default: 0] -= amount
-                        cursor += amount
-                    }
-                }
-
-                let kittyIndex = eligiblePlayers.count
-                let kittyAmount = distribution.count > kittyIndex
-                    ? distribution[kittyIndex]
-                    : 0
-                kittyNeed -= kittyAmount
-
-                if assignGroup(groupIndex + 1) { return true }
-
-                kittyNeed += kittyAmount
-                for (index, player) in eligiblePlayers.enumerated().reversed() {
-                    let amount = distribution[index]
-                    if amount > 0 {
-                        hands[player]?.removeLast(amount)
-                        need[player, default: 0] += amount
-                    }
-                }
+            var total = 0.0
+            for allocation in distributions(group, caps) {
+                let next = zip(caps, allocation).map { $0 - $1 }
+                let weight = caps.indices.reduce(1.0) { $0 * choose(caps[$1], allocation[$1]) }
+                total += weight * ways(group + 1, next)
             }
-            return false
+            memo.ways[key] = total
+            return total
         }
-
-        _ = assignGroup(0)
+        var capacities = initialCapacities
+        for group in suitGroups.indices {
+            if suitGroups[group...].allSatisfy({ item in
+                others.indices.allSatisfy { capacities[$0] == 0 || !(voids[others[$0]]?.contains(item.key) ?? false) }
+            }) {
+                var remaining = suitGroups[group...].flatMap(\.cards)
+                remaining.shuffle(using: &rng)
+                var cursor = 0
+                for seat in others.indices {
+                    let amount = capacities[seat]
+                    hands[others[seat], default: []] += remaining[cursor..<(cursor + amount)]
+                    cursor += amount
+                }
+                return hands
+            }
+            let allocations = distributions(group, capacities)
+            let weights = allocations.map { allocation -> Double in
+                let next = zip(capacities, allocation).map { $0 - $1 }
+                return capacities.indices.reduce(1.0) {
+                    $0 * choose(capacities[$1], allocation[$1])
+                } * ways(group + 1, next)
+            }
+            let total = weights.reduce(0, +)
+            guard total > 0 else { return [:] } // 不返回残缺的抽样手牌
+            var draw = Double.random(in: 0..<total, using: &rng)
+            var selected = weights.lastIndex(where: { $0 > 0 })!
+            for index in weights.indices {
+                draw -= weights[index]
+                if draw < 0 { selected = index; break }
+            }
+            let allocation = allocations[selected]
+            var cursor = 0
+            for seat in others.indices {
+                let amount = allocation[seat]
+                hands[others[seat], default: []] += suitGroups[group].cards[cursor..<(cursor + amount)]
+                cursor += amount
+            }
+            capacities = zip(capacities, allocation).map { $0 - $1 }
+        }
 
         return hands
     }
@@ -526,51 +757,85 @@ extension AIPlayer {
 
 
     static func monteCarloFollowCards(
-        hand: [Card],
-        trick: Trick,
-        evaluator: TrickEvaluator,
-        ts: Suit?,
-        tr: Rank,
-        rng: inout MonteCarloRNG
+        hand: [Card], trick: Trick, position: PlayerPosition? = nil,
+        evaluator: TrickEvaluator, ts: Suit?, tr: Rank, rng: inout MonteCarloRNG,
+        context: AIContext? = nil
     ) -> [Card] {
-        guard let leadCards = trick.leadCards else {
-            return randomCards(from: hand, count: 1, rng: &rng)
-        }
-
-        let count = leadCards.count
-        let leadSuit = evaluator.dominantSuit(of: leadCards)
-        let suitCards = hand.filter { evaluator.cardSuit($0) == leadSuit }
-
-        let selected: [Card]
-        if suitCards.count >= count {
-            if let leadTractor = tractorInfo(of: leadCards, trumpSuit: ts, trumpRank: tr) {
-                let options = tractors(in: suitCards, pairCount: leadTractor.pairCount,
-                                       trumpSuit: ts, trumpRank: tr)
-                selected = options.randomElement(using: &rng)
-                    ?? structuredSuitFollowCards(suitCards: suitCards,
-                                                 neededPairs: leadTractor.pairCount,
-                                                 trumpSuit: ts, trumpRank: tr)
-            } else if pairRepresentative(of: leadCards, trumpSuit: ts, trumpRank: tr) != nil {
-                let options = pairs(in: suitCards, trumpSuit: ts, trumpRank: tr)
-                selected = options.randomElement(using: &rng)
-                    ?? randomCards(from: suitCards, count: count, rng: &rng)
-            } else if let slam = evaluator.slamInfo(of: leadCards) {
-                selected = monteCarloSlamFollowCards(slam: slam, suitCards: suitCards,
-                                                     count: count, ts: ts, tr: tr, rng: &rng)
-            } else {
-                selected = randomCards(from: suitCards, count: count, rng: &rng)
+        guard let lead = trick.leadCards else { return Array(hand.prefix(1)) }
+        let seat = position ?? nextPosition(after: trick.plays.last!.position)
+        let count = lead.count
+        let suit = evaluator.dominantSuit(of: lead)
+        let suited = hand.filter { evaluator.cardSuit($0) == suit }
+        var options: [[Card]] = []
+        if count == 1 {
+            options = (suited.isEmpty ? hand : suited).map { [$0] }
+        } else if suited.count >= count {
+            options.append(structuredSuitFollowCards(suitCards: suited, neededPairs: count / 2,
+                                                      trumpSuit: ts, trumpRank: tr))
+            if let tractor = tractorInfo(of: lead, trumpSuit: ts, trumpRank: tr) {
+                options += tractors(in: suited, pairCount: tractor.pairCount, trumpSuit: ts, trumpRank: tr)
+            } else if isPairMove(lead, ts: ts, tr: tr) {
+                options += pairs(in: suited, trumpSuit: ts, trumpRank: tr)
             }
+            if let slam = evaluator.slamInfo(of: lead) {
+                options.append(monteCarloSlamFollowCards(slam: slam, suitCards: suited,
+                                                         count: count, ts: ts, tr: tr, rng: &rng))
+            }
+            options.append(partnerSupportCards(from: suited, count: count, trumpSuit: ts, trumpRank: tr))
+            options.append(supportingSuitFollowCards(from: suited, leadCards: lead, evaluator: evaluator, ts: ts, tr: tr))
         } else {
-            let suitIDs = Set(suitCards.map(\.id))
-            let rest = hand.filter { !suitIDs.contains($0.id) }
-            selected = suitCards + randomCards(from: rest, count: count - suitCards.count, rng: &rng)
+            let ids = Set(suited.map(\.id))
+            let rest = hand.filter { !ids.contains($0.id) }
+            options.append(suited + weakestCards(from: rest, count: count - suited.count, trumpSuit: ts, trumpRank: tr))
+            options.append(suited + partnerSupportCards(from: rest, count: count - suited.count, trumpSuit: ts, trumpRank: tr))
+            if suited.isEmpty {
+                let trump = trumpCards(in: hand, ts: ts, tr: tr)
+                if let tractor = tractorInfo(of: lead, trumpSuit: ts, trumpRank: tr) {
+                    options += tractors(in: trump, pairCount: tractor.pairCount, trumpSuit: ts, trumpRank: tr)
+                } else if isPairMove(lead, ts: ts, tr: tr) {
+                    options += pairs(in: trump, trumpSuit: ts, trumpRank: tr)
+                } else if let slam = evaluator.slamInfo(of: lead),
+                          let winning = trick.plays.first(where: { $0.position == evaluator.winner(of: trick) })?.cards,
+                          let combo = buildMatchingSlamTrump(slam: slam, trumpCards: trump,
+                                                             winningCards: winning, ts: ts, tr: tr) {
+                    options.append(combo)
+                }
+            }
         }
-
-        if evaluator.isValidPlay(selected: selected, hand: hand, leadCards: leadCards) {
-            return selected
+        let legal = options.filter { evaluator.isValidPlay(selected: $0, hand: hand, leadCards: lead) }
+        let before = evaluator.winner(of: trick)
+        let points = trick.plays.flatMap(\.cards).reduce(0) { $0 + $1.pointValue }
+        let memory = (context ?? AIContext(playedCards: [], knownCards: [], knownCardsByPlayer: [:],
+            voidSuits: [:], isLastPlayer: false)).observing(trick, ts: ts, tr: tr)
+        func score(_ cards: [Card]) -> Double {
+            var test = trick
+            test.plays.append((position: seat, cards: cards))
+            let winner = evaluator.winner(of: test)
+            let ownPoints = cards.reduce(0) { $0 + $1.pointValue }
+            let strength = cards.reduce(0) { $0 + cardStrength($1, ts: ts, tr: tr) }
+            var keep = winner.team == seat.team ? 1.0 : 0.0
+            if keep > 0 {
+                let played = Set(test.plays.map(\.position))
+                let winning = test.plays.first { $0.position == winner }!.cards
+                for enemy in PlayerPosition.allCases where enemy.team != seat.team && !played.contains(enemy) {
+                    let risk = count == 1
+                        ? playerBeatProbability(winning[0], by: enemy, leadSuit: suit,
+                            hand: hand, ts: ts, tr: tr, ctx: memory)
+                        : structuredOvertakeProbability(trick: test, opponent: enemy, hand: hand,
+                            position: seat, state: nil, evaluator: evaluator, ctx: memory)
+                    keep *= 1 - risk
+                }
+            }
+            var value = Double(points + ownPoints) * 8 * (2 * keep - 1) + keep * 6
+                - Double(ownPoints) * 4 * (1 - keep)
+            value -= Double(strength) * 0.12
+            value -= structureFragmentationCost(cards, hand: hand, ts: ts, tr: tr) * 3
+            if before.team == seat.team && winner == seat { value -= 12 }
+            return value
         }
-        return monteCarloFallbackLegalFollow(hand: hand, leadCards: leadCards,
-                                             evaluator: evaluator, ts: ts, tr: tr, rng: &rng)
+        return legal.map { (cards: $0, score: score($0)) }.max { $0.score < $1.score }?.cards
+            ?? monteCarloFallbackLegalFollow(hand: hand, leadCards: lead, evaluator: evaluator,
+                                              ts: ts, tr: tr, rng: &rng)
     }
 
 

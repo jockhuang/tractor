@@ -6,6 +6,31 @@ struct TrickEvaluator {
     let trumpSuit: Suit?
     let trumpRank: Rank
 
+    func isValidLead(_ cards: [Card]) -> Bool {
+        guard let first = cards.first else { return false }
+        let suit = cardSuit(first)
+        return cards.allSatisfy { cardSuit($0) == suit }
+    }
+
+    /// 在实际可选的对子槽数内求最大连对贡献；不能把两段连对的总数
+    /// 截成一个无法组成的奇数要求（例如两段两连对跟三连对）。
+    func maximumTractorPairs(in cards: [Card], slots: Int) -> Int {
+        let allPairs = pairs(in: cards)
+        guard slots >= 2, allPairs.count >= 2 else { return 0 }
+        var best = 0
+        func search(_ start: Int, _ selected: [Card], _ count: Int) {
+            best = max(best, tractorPairCount(in: selected))
+            guard count < slots, start < allPairs.count else { return }
+            for index in start..<allPairs.count {
+                search(index + 1, selected + allPairs[index], count + 1)
+            }
+        }
+        search(0, [], 0)
+        return best
+    }
+
+    func tractorContribution(in cards: [Card]) -> Int { tractorPairCount(in: cards) }
+
     private struct TractorInfo {
         let pairCount: Int
         let highCard: Card
@@ -81,7 +106,7 @@ struct TrickEvaluator {
         let slamTractorPairSlots = slam.tractors.reduce(0) { $0 + $1.count / 2 }
         if slamTractorPairSlots > 0 {
             let handTractorPairs     = tractorPairCount(in: suitCards)
-            let requiredTractorPairs = min(handTractorPairs, slamTractorPairSlots)
+            let requiredTractorPairs = min(handTractorPairs, maximumTractorPairs(in: suitCards, slots: slamTractorPairSlots))
             if requiredTractorPairs > 0 {
                 guard tractorPairCount(in: selectedSuit) >= requiredTractorPairs else { return false }
             }
@@ -94,21 +119,14 @@ struct TrickEvaluator {
     /// 规则：先最大化连对对数，再最大化孤立对子数，剩余才用散牌
     private func validateTractorFollow(selectedSuit: [Card], suitCards: [Card], N: Int) -> Bool {
         // 手中同花色中属于连对序列的对子总数
-        let handTractorPairs   = tractorPairCount(in: suitCards)
-        let requiredTractorPairs = min(handTractorPairs, N)
+        let requiredTractorPairs = maximumTractorPairs(in: suitCards, slots: N)
 
         // 已选牌中连对对数必须 >= 要求
         let selectedTractorPairs = tractorPairCount(in: selectedSuit)
         guard selectedTractorPairs >= requiredTractorPairs else { return false }
 
         // 剩余槽位需要用孤立对子填充
-        let remainingN = N - requiredTractorPairs
-        if remainingN > 0 {
-            let handIsolatedPairs     = isolatedPairCount(in: suitCards)
-            let requiredExtraPairs    = min(handIsolatedPairs, remainingN)
-            let selectedIsolatedPairs = isolatedPairCount(in: selectedSuit)
-            guard selectedIsolatedPairs >= requiredExtraPairs else { return false }
-        }
+        guard pairs(in: selectedSuit).count >= min(pairs(in: suitCards).count, N) else { return false }
 
         return true
     }

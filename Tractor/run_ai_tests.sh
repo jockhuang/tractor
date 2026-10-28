@@ -6,8 +6,12 @@ cd "$(dirname "$0")"
 
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
 OUT="$(mktemp -d)/aitests"
+SWIFT_FLAGS=()
+if [[ "${TRACTOR_AI_TEST_OPTIMIZE:-0}" == "1" ]]; then
+    SWIFT_FLAGS+=("-O")
+fi
 
-xcrun swiftc -D DEBUG -sdk "$SDK" -target arm64-apple-macos13 -o "$OUT" \
+xcrun swiftc -D DEBUG "${SWIFT_FLAGS[@]}" -sdk "$SDK" -target arm64-apple-macos13 -o "$OUT" \
     Tractor/App/Localization.swift \
     Tractor/Models/Card.swift \
     Tractor/Models/Player.swift \
@@ -21,6 +25,7 @@ xcrun swiftc -D DEBUG -sdk "$SDK" -target arm64-apple-macos13 -o "$OUT" \
     Tractor/Engine/AIPlayer+Scoring.swift \
     Tractor/Engine/AIPlayer+MonteCarlo.swift \
     Tractor/Engine/AIPlayer+Debug.swift \
+    AITests/SelfPlayAudit.swift \
     AITests/main.swift
 
 "$OUT"

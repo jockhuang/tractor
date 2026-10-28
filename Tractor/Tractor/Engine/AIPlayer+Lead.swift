@@ -17,6 +17,17 @@ extension AIPlayer {
         let ts = state.trumpSuit
         let tr = state.trumpRank
 
+        let assets = filterAllowedLeadAssets(
+            deduplicatedLeadAssets(buildLeadAssets(position: position, hand: hand, state: state, ctx: ctx)),
+            position: position, hand: hand, state: state
+        )
+        // 先识别会随绝门而贬值的兑现窗口，再考虑保底/清门。保留最后主控
+        // 不能把安全副A降成杂牌，短期抽样也不能假定留到以后仍能兑现。
+        if let cashing = cashingWindowAssets(assets, position: position, hand: hand, state: state, ctx: ctx) {
+            return bestLeadAssetCards(cashing, position: position, hand: hand,
+                state: state, evaluator: evaluator, ctx: ctx)
+        }
+
         if let bottomControlLead = knownPointKittyEndgameLead(
             position: position,
             hand: hand,
@@ -37,20 +48,47 @@ extension AIPlayer {
             return preserved
         }
 
-        let assets = filterAllowedLeadAssets(
-            deduplicatedLeadAssets(
-                buildLeadAssets(position: position, hand: hand, state: state, ctx: ctx)
-            ),
-            position: position,
-            hand: hand,
-            state: state
-        )
-
         guard !assets.isEmpty else {
             return weakestCards(from: hand, count: 1, trumpSuit: ts, trumpRank: tr)
         }
 
-        let assetPool = selectLeadAssetPool(assets)
+        return bestLeadAssetCards(assets, position: position, hand: hand,
+            state: state, evaluator: evaluator, ctx: ctx)
+    }
+
+    /// 时效性机会约束，而不是“所有A无条件先出”。窗口内允许多个副A、
+    /// 已知最大对与完整控制组共同择优；其他有明确目标的方案在窗口外照常比较。
+    static func cashingWindowAssets(
+        _ assets: [LeadAsset], position: PlayerPosition, hand: [Card], state: GameState, ctx: AIContext
+    ) -> [LeadAsset]? {
+        // 对手已绝主后，副牌控制不再因将吃而贬值，可以先跑分/安排末墩。
+        guard !ctx.allEnemiesVoid(myTeam: position.team, key: "TRUMP") else { return nil }
+        let cashing = assets.filter { asset in
+            guard asset.tier == .cashingWinner || asset.tier == .safeControlGroup,
+                  !isTrumpLead(asset.move, ts: state.trumpSuit, tr: state.trumpRank),
+                  !moveSuitAwaitingTrumpPull(asset.move.cards, position: position,
+                    hand: hand, state: state, ctx: ctx) else { return false }
+            let security = leadTeamControlProbability(asset.move.cards, position: position,
+                hand: hand, state: state, ctx: ctx)
+            let key = AIContext.suitKey(asset.move.cards[0], ts: state.trumpSuit, tr: state.trumpRank)
+            let knownRuffer = ctx.voidEnemies(myTeam: position.team, key: key)
+                .contains { !ctx.isVoid($0, key: "TRUMP") }
+            // 首次绝门的低概率不等于严格锁定；已知有将吃者时只兑现近乎
+            // 无法将吃的完整结构，不拿裸A冒险。
+            return security >= (knownRuffer ? 0.95 : 0.8)
+        }
+        return cashing.isEmpty ? nil : cashing
+    }
+
+    static func bestLeadAssetCards(
+        _ assets: [LeadAsset], position: PlayerPosition, hand: [Card], state: GameState,
+        evaluator: TrickEvaluator, ctx: AIContext
+    ) -> [Card] {
+        let ts = state.trumpSuit
+        let tr = state.trumpRank
+        let plan = leadControlPlan(position: position, hand: hand, state: state, ctx: ctx)
+        let purposefulAssets = filterUnplannedSideFallback(assets, position: position, hand: hand, state: state, ctx: ctx)
+        let assetPool = selectLeadAssetPool(purposefulAssets, preferTrumpTransfer: plan != .reassessSideAssets)
         let rankedAssets = assetPool.sorted {
             if $0.tier.rawValue != $1.tier.rawValue { return $0.tier.rawValue < $1.tier.rawValue }
             if $0.score != $1.score { return $0.score > $1.score }
@@ -207,7 +245,8 @@ extension AIPlayer {
         let ts = state.trumpSuit
         let tr = state.trumpRank
         let myTeam = position.team
-        let safeGroups = findSlamLeadCandidates(in: hand, ts: ts, tr: tr, myTeam: myTeam, ctx: ctx)
+        let safeGroups = findSlamLeadCandidates(in: hand, ts: ts, tr: tr, myTeam: myTeam,
+            ctx: ctx, position: position, state: state)
         // Asset Lifecycle: when a side suit would be ruffed now but re-appreciates after
         // pulling trump, do not treat it as an immediate Tier 1 cashing asset (delay, pull first).
         let cashingGroups = safeGroups.filter {
@@ -260,12 +299,32 @@ extension AIPlayer {
             ))
         }
 
-        // Tier 4: build future control only after no cashing/group/structure asset needs action.
-        let initiativeMoves =
+        // 副牌孤对尽早整出清门；J及以上对子在没有更好资产时先试，
+        // 避免普通吊主让对子一直留到被迫拆跟。仍保留明确的先拔主保护计划。
+        for move in findTimelySidePairLeadCandidates(
+            in: hand, position: position, state: state, ctx: ctx
+        ) where !isStrictSubsetOfAnyGroup(move.cards, groups: protectedGroups) {
+            assets.append(LeadAsset(
+                move: move, tier: .sidePairOpportunity,
+                score: leadAssetScore(move, tier: .sidePairOpportunity,
+                    position: position, hand: hand, state: state, ctx: ctx)
+            ))
+        }
+
+        // Build future control only after no cashing/group/structure/pair asset needs action.
+        var initiativeMoves =
             findPartnerDumpLeadCandidates(in: hand, position: position, ts: ts, tr: tr, ctx: ctx)
-            + findLongSuitDevelopmentLeadCandidates(in: hand, ts: ts, tr: tr, myTeam: myTeam, ctx: ctx)
+            + findWeakPairDisposalLeadCandidates(in: hand, ts: ts, tr: tr, myTeam: myTeam, ctx: ctx)
+                .filter { !isTrumpLead($0, ts: ts, tr: tr) }
             + findTrumpLeadCandidates(in: hand, position: position, state: state, ts: ts, tr: tr, ctx: ctx)
             + findTrumpTransferLeadCandidates(in: hand, ts: ts, tr: tr)
+        if leadControlPlan(position: position, hand: hand, state: state, ctx: ctx) == .reassessSideAssets {
+            // 经历过队友/对手领牌后再拿回牌权，要重新考虑清门和杂牌处理，
+            // 这些走法不再被默认吊主挡在下一层。
+            initiativeMoves += findLongSuitDevelopmentLeadCandidates(in: hand, ts: ts, tr: tr, myTeam: myTeam, ctx: ctx)
+            initiativeMoves += findWeakLeadCandidates(in: hand, ts: ts, tr: tr)
+                .filter { !isTrumpLead($0, ts: ts, tr: tr) }
+        }
         for move in initiativeMoves where !isStrictSubsetOfAnyGroup(move.cards, groups: protectedGroups) {
             assets.append(LeadAsset(
                 move: move,
@@ -274,9 +333,10 @@ extension AIPlayer {
             ))
         }
 
-        // Tier 5: disposal, including ordinary weak pairs only when nothing strategic exists.
+        // Disposal, including ordinary weak pairs only when nothing strategic exists.
         let disposalMoves =
             findWeakLeadCandidates(in: hand, ts: ts, tr: tr)
+            + findLongSuitDevelopmentLeadCandidates(in: hand, ts: ts, tr: tr, myTeam: myTeam, ctx: ctx)
             + findWeakPairDisposalLeadCandidates(in: hand, ts: ts, tr: tr, myTeam: myTeam, ctx: ctx)
         for move in disposalMoves where !isStrictSubsetOfAnyGroup(move.cards, groups: protectedGroups) {
             assets.append(LeadAsset(
@@ -329,17 +389,31 @@ extension AIPlayer {
     }
 
 
-    static func selectLeadAssetPool(_ assets: [LeadAsset]) -> [LeadAsset] {
-        guard let bestTier = assets.map(\.tier.rawValue).min() else { return [] }
-        let pool = assets.filter { $0.tier.rawValue == bestTier }
-        guard pool.first?.tier == .initiativeBuilder else { return pool }
-
-        // Tier 4 内部：没有明确队友垫分计划时，低成本小主过渡比长门弱副牌更稳定。
-        if pool.contains(where: { $0.move.kind == .partnerDump }) {
-            return pool
+    static func selectLeadAssetPool(_ assets: [LeadAsset], preferTrumpTransfer: Bool = true) -> [LeadAsset] {
+        // 层级是先验，不是互斥开关。兑现、结构、试对、牌权计划和清门
+        // 各保留一个最佳代表，余下名额再按分补齐，让低成本替代也能接受模拟。
+        let ranked = assets.sorted {
+            if $0.score != $1.score { return $0.score > $1.score }
+            if preferTrumpTransfer && ($0.move.kind == .trumpTransfer) != ($1.move.kind == .trumpTransfer) {
+                return $0.move.kind == .trumpTransfer
+            }
+            return moveKey($0.move.cards) < moveKey($1.move.cards)
         }
-        let trumpTransfers = pool.filter { $0.move.kind == .trumpTransfer }
-        return trumpTransfers.isEmpty ? pool : trumpTransfers
+        func family(_ asset: LeadAsset) -> Int {
+            asset.tier == .safeControlGroup ? LeadAssetTier.cashingWinner.rawValue : asset.tier.rawValue
+        }
+        var selected: [LeadAsset] = []
+        var families = Set<Int>()
+        var keys = Set<String>()
+        for asset in ranked where families.insert(family(asset)).inserted {
+            guard selected.count < monteCarloTopMoveCount else { break }
+            selected.append(asset)
+            keys.insert(moveKey(asset.move.cards))
+        }
+        for asset in ranked where selected.count < monteCarloTopMoveCount {
+            if keys.insert(moveKey(asset.move.cards)).inserted { selected.append(asset) }
+        }
+        return selected
     }
 
 
@@ -355,7 +429,7 @@ extension AIPlayer {
         let tr = state.trumpRank
         let cards = move.cards
         let points = Double(cards.reduce(0) { $0 + $1.pointValue })
-        let security = leadWinProbability(cards, hand: hand, ts: ts, tr: tr, ctx: ctx)
+        let security = leadTeamControlProbability(cards, position: position, hand: hand, state: state, ctx: ctx)
         let pointPressure = pointPressureBonus(totalPoints: Int(points))
         let endgameAdjustment = endgameControlPreservationScoreAdjustment(
             move,
@@ -384,14 +458,19 @@ extension AIPlayer {
                 + points * 4
                 + wholeStructureControlValue(cards, hand: hand, ts: ts, tr: tr, ctx: ctx) * 80
                 + (isTractorLead(cards, ts: ts, tr: tr) ? 35 : 0)
+        case .sidePairOpportunity:
+            base = 200
+                + Double(cards.first?.rank.rawValue ?? 0) * 4
+                + (clearsSideSuitForLead(cards, hand: hand, ts: ts, tr: tr) ? 30 : 0)
         case .initiativeBuilder:
             let remaining = handAfterPlaying(cards, from: hand)
+            let plan = leadControlPlan(position: position, hand: hand, state: state, ctx: ctx)
             var s = 120
                 + leadInitiativeValue(hand: remaining, position: position, state: state, ctx: ctx, security: max(security, 0.55)) * 80
                 + partnerDumpLeadValue(cards, position: position, tr: tr, ctx: ctx) * 35
-                + idleTrumpTransferValue(move, hand: hand, ts: ts, tr: tr)
+                + (plan == .reassessSideAssets ? 0 : idleTrumpTransferValue(move, hand: hand, ts: ts, tr: tr))
                 + fallbackLeadShapeAdjustment(move, ts: ts, tr: tr)
-                - points * 2
+                - (isPairMove(cards, ts: ts, tr: tr) ? 0 : points * 2)
             // Asset Lifecycle: pull trump to unlock side-suit winners awaiting it (pull first, realize later).
             if isTrumpLead(move, ts: ts, tr: tr) {
                 s += delayedSideRealizationValue(position: position, hand: hand, state: state, ctx: ctx) * 1.2
@@ -411,7 +490,28 @@ extension AIPlayer {
                 + (clearsSideSuitForLead(cards, hand: hand, ts: ts, tr: tr) ? 15 : 0)
                 + fallbackLeadShapeAdjustment(move, ts: ts, tr: tr)
         }
-        return base + endgameAdjustment
+        // 同一资产也会因绝门、主牌耗尽而升贬值，层级先验不能掩盖实际风险。
+        return base * (0.35 + security * 0.65) + endgameAdjustment
+    }
+
+    static func leadTeamControlProbability(
+        _ cards: [Card], position: PlayerPosition, hand: [Card], state: GameState, ctx: AIContext
+    ) -> Double {
+        guard let first = cards.first else { return 0 }
+        let evaluator = TrickEvaluator(trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
+        var trick = Trick(leadPosition: position)
+        trick.plays = [(position, cards)]
+        var keep = 1.0
+        for opponent in PlayerPosition.allCases where opponent.team != position.team {
+            let risk = cards.count == 1
+                ? playerBeatProbability(first, by: opponent, leadSuit: evaluator.cardSuit(first),
+                    hand: hand, ts: state.trumpSuit, tr: state.trumpRank, ctx: ctx,
+                    state: state, position: position)
+                : structuredOvertakeProbability(trick: trick, opponent: opponent, hand: hand,
+                    position: position, state: state, evaluator: evaluator, ctx: ctx)
+            keep *= 1 - risk
+        }
+        return keep
     }
 
 
@@ -537,7 +637,7 @@ extension AIPlayer {
         let tr = gameState.trumpRank
         let ctx = AIContext.build(state: gameState, ts: ts, tr: tr)
         let activePosition = gameState.currentTurn
-        let totalTrump = Deck.doubleDeck().filter {
+        let totalTrump = referenceDeck.filter {
             CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
         }.count
         let playedTrump = ctx.playedCards.filter {
@@ -547,22 +647,8 @@ extension AIPlayer {
             myTeam: activePosition.team,
             key: "TRUMP"
         ).count
-        let trumpLeadTricks = gameState.completedTricks.filter { trick in
-            guard let first = trick.plays.first?.cards.first else { return false }
-            return CardComparator.isTrump(first, trumpSuit: ts, trumpRank: tr)
-        }
-        let recentTrumpLeadVoids = trumpLeadTricks.suffix(3).reduce(0) { partial, trick in
-            guard let lead = trick.plays.first else { return partial }
-            return partial + trick.plays.filter {
-                $0.position != lead.position
-                    && $0.position.team != activePosition.team
-                    && $0.cards.first.map {
-                        !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
-                    } ?? false
-            }.count
-        }
         let playedRatio = totalTrump == 0 ? 1.0 : Double(playedTrump) / Double(totalTrump)
-        let bigTrumpTotal = Deck.doubleDeck().filter {
+        let bigTrumpTotal = referenceDeck.filter {
             $0.rank == .bigJoker || $0.rank == .smallJoker || $0.rank == tr
         }.count
         let bigTrumpPlayed = ctx.playedCards.filter {
@@ -570,7 +656,6 @@ extension AIPlayer {
         }.count
 
         return trumpVoidEnemyCount == 2
-            || recentTrumpLeadVoids >= 3
             || playedRatio >= 0.72
             || (playedRatio >= 0.6 && bigTrumpPlayed >= max(1, bigTrumpTotal - 2))
     }
@@ -704,6 +789,19 @@ extension AIPlayer {
             .sorted { endgameSideDisposalSort($0, $1, hand: hand, state: state, ctx: ctx) }
 
         var moves = singletonCandidates.map { AIMove(cards: [$0], kind: .weak) }
+        let bundles = findSlamLeadCandidates(in: hand, ts: ts, tr: tr, myTeam: position.team,
+            ctx: ctx, position: position, state: state).filter { cards in
+                Set(cards.map(\.id)).isDisjoint(with: protectedIDs)
+                    && leadTeamControlProbability(cards, position: position, hand: hand, state: state, ctx: ctx) >= 0.95
+            }
+        // 保留末轮主控不等于把安全副牌甩牌拆单；整组同样能先清副牌。
+        moves.removeAll { isStrictSubsetOfAnyGroup($0.cards, groups: bundles) }
+        moves += bundles.map { AIMove(cards: $0, kind: .slam) }
+        let pointBundles = bundles.filter { $0.contains { $0.pointValue > 0 } }
+        if !pointBundles.isEmpty {
+            // 既不动最后主控、又能安全兑现实分的整组，先于无分杂牌清理。
+            moves = pointBundles.map { AIMove(cards: $0, kind: .slam) }
+        }
 
         if moves.isEmpty {
             let weakPairs = pairs(in: sideCards, trumpSuit: ts, trumpRank: tr)
@@ -884,7 +982,7 @@ extension AIPlayer {
         let knownCards = (ctx.knownCards + hand).filter {
             seenIDs.insert($0.id).inserted
         }
-        let pointDeck = Deck.doubleDeck().filter { $0.pointValue > 0 }
+        let pointDeck = referenceDeck.filter { $0.pointValue > 0 }
 
         let totalPointCounts = Dictionary(grouping: pointDeck, by: cardFaceKey)
             .mapValues(\.count)
@@ -991,7 +1089,32 @@ extension AIPlayer {
         guard let first = cards.first,
               !CardComparator.isTrump(first, trumpSuit: ts, trumpRank: tr),
               let suit = first.suit else { return false }
-        return suitAwaitingTrumpPull(suit, position: position, hand: hand, state: state, ctx: ctx)
+        guard suitAwaitingTrumpPull(suit, position: position, hand: hand, state: state, ctx: ctx) else { return false }
+        if cards.count == 1 { return true }
+        // 副牌对子/拖拉机需要相应主结构才能将吃；不能因对手还有一张主
+        // 就无限期推迟已经安全的整对。这里与模拟、跟牌安全证明使用同一牌池。
+        let evaluator = TrickEvaluator(trumpSuit: ts, trumpRank: tr)
+        let slam = evaluator.slamInfo(of: cards)
+        let needsPairs = isPairMove(cards, ts: ts, tr: tr)
+            || tractorInfo(of: cards, trumpSuit: ts, trumpRank: tr) != nil
+            || !(slam?.pairs.isEmpty ?? true) || !(slam?.tractors.isEmpty ?? true)
+        let ruffers = ctx.voidEnemies(myTeam: position.team, key: suit.rawValue).filter {
+            !ctx.isVoid($0, key: "TRUMP") && state.handCount(for: $0) >= cards.count
+                && (!needsPairs || !failedToFollowTrumpPair(position: $0, state: state, ts: ts, tr: tr))
+        }
+        guard !ruffers.isEmpty else { return false }
+        var known = ctx.playedCards + hand
+        if position == state.dealerPosition { known += state.kitty }
+        let trumps = removeKnownFaces(from: referenceDeck, knownCards: known).filter {
+            CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
+        }
+        if let tractor = tractorInfo(of: cards, trumpSuit: ts, trumpRank: tr) {
+            return !tractors(in: trumps, pairCount: tractor.pairCount, trumpSuit: ts, trumpRank: tr).isEmpty
+        }
+        if isPairMove(cards, ts: ts, tr: tr) { return !pairs(in: trumps, trumpSuit: ts, trumpRank: tr).isEmpty }
+        guard let slam else { return false }
+        return buildMatchingSlamTrump(slam: slam, trumpCards: trumps, winningCards: cards,
+            ts: ts, tr: tr, stopAtFirstWinner: true) != nil
     }
 
 
@@ -1093,6 +1216,53 @@ extension AIPlayer {
         return 55.0 + max(0, reserveBonus)
     }
 
+    /// 吊主的目的分为“交给对家领牌”与“拔主解锁副牌赢家”。
+    /// 计划进度完全由本局公开出牌历史推导，每次拿回牌权重新评估；
+    /// 不读取其他玩家手牌，也不需要在联机快照中保存额外的AI私有状态。
+    static func leadControlPlan(
+        position: PlayerPosition, hand: [Card], state: GameState, ctx: AIContext
+    ) -> LeadControlPlan {
+        if ctx.allEnemiesVoid(myTeam: position.team, key: "TRUMP") { return .reassessSideAssets }
+        // 有明确的副牌将吃威胁及足够控主资源时，继续拔主仍有具体收益。
+        if delayedSideRealizationValue(position: position, hand: hand, state: state, ctx: ctx) >= 30
+            || sidePairProtectionValue(position: position, hand: hand, state: state, ctx: ctx) >= 45 {
+            return .pullForSideWinners
+        }
+        if let partner = PlayerPosition.allCases.first(where: { $0 != position && $0.team == position.team }),
+           ctx.isVoid(partner, key: "TRUMP") { return .reassessSideAssets }
+
+        func transferPlan() -> LeadControlPlan {
+            let partner = PlayerPosition(rawValue: (position.rawValue + 2) % 4)!
+            guard let small = leadableSingletons(from: hand, isTrump: true, pointOnly: false,
+                trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
+                .first(where: { !isBigTrump($0, ts: state.trumpSuit, tr: state.trumpRank) }),
+                playerBeatProbability(small, by: partner, leadSuit: nil, hand: hand,
+                    ts: state.trumpSuit, tr: state.trumpRank, ctx: ctx,
+                    state: state, position: position) > 0 else { return .reassessSideAssets }
+            return .seekPartnerLead
+        }
+
+        var ownTransferAttempts = 0
+        // 只重建最近一段计划。自己领过副牌意味着已经开始并执行了新的
+        // 兑现/发展计划，不能让更早的一次他人领牌永久关闭后续交牌权机会。
+        for trick in state.completedTricks.reversed() {
+            guard let lead = trick.plays.first, let first = lead.cards.first else { continue }
+            // 对家已经得到过领牌机会，或对手领过牌而自己现已拿回主动权，
+            // 均不再重复用默认吊主替代新的副牌计划。
+            if lead.position != position { return .reassessSideAssets }
+            if lead.cards.count == 1,
+               CardComparator.isTrump(first, trumpSuit: state.trumpSuit, trumpRank: state.trumpRank),
+               !isBigTrump(first, ts: state.trumpSuit, tr: state.trumpRank), first.pointValue == 0 {
+                ownTransferAttempts += 1
+                if ownTransferAttempts >= 2 { return .reassessSideAssets }
+            } else {
+                return CardComparator.isTrump(first, trumpSuit: state.trumpSuit, trumpRank: state.trumpRank)
+                    ? .reassessSideAssets : transferPlan()
+            }
+        }
+        return transferPlan()
+    }
+
 
     /// 无兑现资产时的兜底牌型微调：普通副牌对子仍有逼出对方对子、争取牌权的价值，
     /// 并只按对子本身的牌力连续排序，不把 5/10/K 作为特殊档位；
@@ -1111,6 +1281,61 @@ extension AIPlayer {
             return -10
         }
         return 0
+    }
+
+    /// 纯兜底接近同分时，稍偏向有公开依据的低成本交牌权；不盖过兑现/对子/清分计划。
+    static func fallbackTrumpTransferPreference(
+        _ move: AIMove, position: PlayerPosition, hand: [Card], state: GameState, ctx: AIContext
+    ) -> Double {
+        guard state.currentTrick.plays.isEmpty,
+              !ctx.allEnemiesVoid(myTeam: position.team, key: "TRUMP"),
+              let transfer = findTrumpTransferLeadCandidates(in: hand, ts: state.trumpSuit, tr: state.trumpRank).first else { return 0 }
+        let partner = PlayerPosition(rawValue: (position.rawValue + 2) % 4)!
+        guard !ctx.isVoid(partner, key: "TRUMP"),
+              playerBeatProbability(transfer.cards[0], by: partner, leadSuit: nil, hand: hand,
+                ts: state.trumpSuit, tr: state.trumpRank, ctx: ctx, state: state, position: position) > 0 else { return 0 }
+        if sameCardSet(move.cards, transfer.cards) { return 3 }
+        if move.kind == .weak, move.cards.count == 1, let first = move.cards.first,
+           first.pointValue == 0, !CardComparator.isTrump(first, trumpSuit: state.trumpSuit, trumpRank: state.trumpRank),
+           !clearsSideSuitForLead(move.cards, hand: hand, ts: state.trumpSuit, tr: state.trumpRank),
+           !ctx.isEffectivelyBiggest(first, ts: state.trumpSuit, tr: state.trumpRank, hand: hand) { return -3 }
+        return 0
+    }
+
+    static func filterUnplannedSideFallback(
+        _ assets: [LeadAsset], position: PlayerPosition, hand: [Card], state: GameState, ctx: AIContext
+    ) -> [LeadAsset] {
+        func unplannedSideSingle(_ asset: LeadAsset) -> Bool {
+            let move = asset.move
+            guard move.kind == .weak, move.cards.count == 1, let card = move.cards.first,
+                  card.pointValue == 0, !isTrumpLead(move, ts: state.trumpSuit, tr: state.trumpRank) else { return false }
+            return !clearsSideSuitForLead(move.cards, hand: hand, ts: state.trumpSuit, tr: state.trumpRank)
+                && !ctx.isEffectivelyBiggest(card, ts: state.trumpSuit, tr: state.trumpRank, hand: hand)
+        }
+        let transfers = assets.filter {
+            fallbackTrumpTransferPreference($0.move, position: position, hand: hand, state: state, ctx: ctx) > 0
+        }
+        guard !transfers.isEmpty else { return assets }
+        let plan = leadControlPlan(position: position, hand: hand, state: state, ctx: ctx)
+        if plan == .seekPartnerLead || plan == .pullForSideWinners {
+            let partner = PlayerPosition(rawValue: (position.rawValue + 2) % 4)!
+            let planned = assets.filter { asset in
+                guard unplannedSideSingle(asset), let card = asset.move.cards.first,
+                      card.rank.rawValue <= Rank.nine.rawValue, let suit = card.suit else { return true }
+                // 有副牌对子不等于“另出一张小副牌”也有计划。逐走法剔除这类
+                // 无目标小单，保留对子等其他方案与小主比较。已知对家绝门且
+                // 本门还有分是公开配合目标；高副单试探和真正清门也不在此裁剪。
+                return ctx.isVoid(partner, key: suit.rawValue)
+                    && ctx.unplayedSuitPoints(suit: suit, tr: state.trumpRank) > 0
+            }
+            if planned.count < assets.count { return planned }
+        }
+        // 只处理真正的兜底空档；对子、甩牌、兑现、清门、公开对家垫分目标
+        // 都继续共同评估。没有这些目标时，不靠抽样里虚构的对家大牌领小副。
+        guard assets.allSatisfy({ $0.tier == .initiativeBuilder || $0.tier == .weakDisposal }),
+              assets.allSatisfy({ isTrumpLead($0.move, ts: state.trumpSuit, tr: state.trumpRank) || unplannedSideSingle($0) })
+        else { return assets }
+        return transfers
     }
 
 
@@ -1295,6 +1520,31 @@ extension AIPlayer {
         }
     }
 
+    /// “孤对”指本逻辑副花色只剩这两张，不是从拖拉机中抽出一个对子。
+    /// 孤对（任意点数）和J以上副牌对在普通吊主之前使用；
+    /// 牌权周转后重新组织副牌时，其他小对子也可优先整出。
+    static func findTimelySidePairLeadCandidates(
+        in hand: [Card], position: PlayerPosition, state: GameState, ctx: AIContext
+    ) -> [AIMove] {
+        let ts = state.trumpSuit
+        let tr = state.trumpRank
+        let reassessing = leadControlPlan(position: position, hand: hand, state: state, ctx: ctx) == .reassessSideAssets
+        let side = hand.filter { !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr) }
+        return pairs(in: side, trumpSuit: ts, trumpRank: tr).compactMap { pair in
+            guard let rep = pairRepresentative(of: pair, trumpSuit: ts, trumpRank: tr),
+                  let suit = rep.suit else { return nil }
+            let isolated = side.filter { $0.suit == suit }.count == 2
+            guard isolated || rep.rank.rawValue >= Rank.jack.rawValue || reassessing,
+                  structureFragmentationCost(pair, hand: hand, ts: ts, tr: tr) == 0,
+                  !moveSuitAwaitingTrumpPull(pair, position: position, hand: hand, state: state, ctx: ctx) else {
+                return nil
+            }
+            if ctx.allEnemiesVoid(myTeam: position.team, key: suit.rawValue),
+               !ctx.allEnemiesVoid(myTeam: position.team, key: "TRUMP") { return nil }
+            return AIMove(cards: pair, kind: .bigPair)
+        }
+    }
+
 
     static func findNoTrumpControlLeadCandidates(
         in hand: [Card], position: PlayerPosition, state: GameState,
@@ -1347,7 +1597,10 @@ extension AIPlayer {
             if let stronger = trumpCards.sorted(by: {
                 CardComparator.trumpWeight($0, trumpSuit: ts, trumpRank: tr)
                     > CardComparator.trumpWeight($1, trumpSuit: ts, trumpRank: tr)
-            }).first(where: { isSafeTrumpFiller($0, ts: ts, tr: tr, ctx: ctx, hand: hand) }) {
+            }).first(where: {
+                !pairedCardIDs(in: hand, trumpSuit: ts, trumpRank: tr).contains($0.id)
+                    && isSafeTrumpFiller($0, ts: ts, tr: tr, ctx: ctx, hand: hand)
+            }) {
                 moves.append(AIMove(cards: [stronger], kind: .trump))
             }
         }
@@ -1394,6 +1647,21 @@ extension AIPlayer {
         let ts = state.trumpSuit
         let tr = state.trumpRank
         guard isTrumpLead(move, ts: ts, tr: tr) else { return true }
+        // 所有生成路径统一保护大主对子，包括拖拉机和无主控制组。
+        if hand.count > 6 {
+            let selected = Set(move.cards.map(\.id))
+            if pairs(in: hand, trumpSuit: ts, trumpRank: tr).contains(where: {
+                isBigTrump($0[0], ts: ts, tr: tr) && $0.contains { selected.contains($0.id) }
+            }) { return false }
+            if containsBigTrump(move.cards, ts: ts, tr: tr) {
+                let context = AIContext.build(state: state, ts: ts, tr: tr)
+                let cheapTrump = leadableSingletons(from: hand, isTrump: true, pointOnly: false,
+                    trumpSuit: ts, trumpRank: tr).contains { !isBigTrump($0, ts: ts, tr: tr) }
+                guard !cheapTrump,
+                      leadControlPlan(position: position, hand: hand, state: state, ctx: context) == .pullForSideWinners
+                else { return false }
+            }
+        }
         if ts == nil,
            (isStrongNoTrumpPair(move.cards, trumpRank: tr)
                 || tractorInfo(of: move.cards, trumpSuit: ts, trumpRank: tr) != nil) {
@@ -1544,14 +1812,16 @@ extension AIPlayer {
     /// 例：手中 A♠K♠K♠ → KK 是最大对子（A 在手里，外面最多 1 张 A 凑不成 AA 对），A 是最大单张 → 合法甩牌
     ///     手中 A♠Q♠Q♠ 且手中还有 K♠ → QQ 是最大对子（K/A 各有 ≥1 张在手，外面凑不成 KK/AA），A 最大单张 → 合法甩牌
     ///
-    /// - 对手已确认绝该花色：仅当组合含对子时才甩
+    /// - 有人绝门时纯散牌甩牌需等待主牌消耗到足够少，不能一律禁甩。
     /// 优先选张数最多的花色，张数相同时优先含对子的花色
     static func findSlamLeadCandidates(
         in hand: [Card],
         ts: Suit?,
         tr: Rank,
         myTeam: Int,
-        ctx: AIContext
+        ctx: AIContext,
+        position: PlayerPosition? = nil,
+        state: GameState? = nil
     ) -> [[Card]] {
         let sideCards = hand.filter { !CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr) }
         var bySuit: [Suit: [Card]] = [:]
@@ -1562,8 +1832,12 @@ extension AIPlayer {
 
         var candidates: [[Card]] = []
         for (suit, suitCards) in bySuit {
+            let allOthersVoid = position.map { observer in
+                PlayerPosition.allCases.filter { $0 != observer }
+                    .allSatisfy { ctx.isVoid($0, key: suit.rawValue) }
+            } ?? false
             let unbeatableSingles = suitCards.filter {
-                isEffectivelyBiggestSingle($0, hand: hand, ctx: ctx, ts: ts, tr: tr)
+                allOthersVoid || isEffectivelyBiggestSingle($0, hand: hand, ctx: ctx, ts: ts, tr: tr)
             }
 
             var rankGroups: [Rank: [Card]] = [:]
@@ -1571,7 +1845,7 @@ extension AIPlayer {
 
             var unbeatablePairCards: [Card] = []
             for cards in rankGroups.values where cards.count >= 2 {
-                if isEffectivelyBiggestPair(cards[0], hand: hand, ctx: ctx, ts: ts, tr: tr) {
+                if allOthersVoid || isEffectivelyBiggestPair(cards[0], hand: hand, ctx: ctx, ts: ts, tr: tr) {
                     unbeatablePairCards += Array(cards.prefix(2))
                 }
             }
@@ -1586,7 +1860,11 @@ extension AIPlayer {
 
             let hasVoidEnemy = ctx.voidEnemies(myTeam: myTeam, key: suit.rawValue).count > 0
             let hasPairs = !unbeatablePairCards.isEmpty
-            if hasVoidEnemy && !hasPairs { continue }
+            if hasVoidEnemy && !hasPairs {
+                guard let position,
+                      latePureSlamAllowed(candidateCards, hand: hand, position: position,
+                        ts: ts, tr: tr, ctx: ctx, state: state) else { continue }
+            }
 
             candidates.append(candidateCards)
 
@@ -1597,6 +1875,32 @@ extension AIPlayer {
             }
         }
         return candidates
+    }
+
+    /// 外面主还多时保留早期保护；主少时比较“凑齐N张全主”而非单张将吃。
+    static func latePureSlamAllowed(
+        _ cards: [Card], hand: [Card], position: PlayerPosition, ts: Suit?, tr: Rank,
+        ctx: AIContext, state: GameState?
+    ) -> Bool {
+        let ruffers = PlayerPosition.allCases.filter {
+            $0.team != position.team && !ctx.isVoid($0, key: "TRUMP")
+        }
+        if ruffers.isEmpty { return true }
+        var known = ctx.playedCards + hand
+        if let state, position == state.dealerPosition { known += state.kitty }
+        let remainingTrump = removeKnownFaces(from: referenceDeck, knownCards: known).filter {
+            CardComparator.isTrump($0, trumpSuit: ts, trumpRank: tr)
+        }.count
+        if remainingTrump < cards.count { return true }
+        guard remainingTrump <= max(4, cards.count * 2 - 1) else { return false }
+        var trick = Trick(leadPosition: position)
+        trick.plays = [(position, cards)]
+        let evaluator = TrickEvaluator(trumpSuit: ts, trumpRank: tr)
+        let keep = ruffers.reduce(1.0) { probability, opponent in
+            probability * (1 - structuredOvertakeProbability(trick: trick, opponent: opponent,
+                hand: hand, position: position, state: state, evaluator: evaluator, ctx: ctx))
+        }
+        return keep >= 0.75
     }
 
 

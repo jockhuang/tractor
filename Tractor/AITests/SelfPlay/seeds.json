@@ -1,0 +1,449 @@
+{
+  "formatVersion": 1,
+  "batches": [
+    {
+      "id": "seeds-1501-1510-baseline",
+      "label": "首批10局原始记录；前两局沿用旧冒烟测试先手配置",
+      "file": "seeds-1501-1510-baseline.json",
+      "seeds": [
+        1501,
+        1502,
+        1503,
+        1504,
+        1505,
+        1506,
+        1507,
+        1508,
+        1509,
+        1510
+      ],
+      "configurations": [
+        {
+          "seed": 1501,
+          "trumpSuit": "♦",
+          "trumpRank": 5,
+          "dealer": 0,
+          "initialLeader": 2,
+          "decisions": 60,
+          "attackPoints": 70
+        },
+        {
+          "seed": 1502,
+          "trumpSuit": null,
+          "trumpRank": 5,
+          "dealer": 0,
+          "initialLeader": 2,
+          "decisions": 72,
+          "attackPoints": 100
+        },
+        {
+          "seed": 1503,
+          "trumpSuit": "♠",
+          "trumpRank": 2,
+          "dealer": 2,
+          "initialLeader": 2,
+          "decisions": 64,
+          "attackPoints": 130
+        },
+        {
+          "seed": 1504,
+          "trumpSuit": "♥",
+          "trumpRank": 7,
+          "dealer": 3,
+          "initialLeader": 3,
+          "decisions": 80,
+          "attackPoints": 135
+        },
+        {
+          "seed": 1505,
+          "trumpSuit": "♣",
+          "trumpRank": 10,
+          "dealer": 0,
+          "initialLeader": 0,
+          "decisions": 76,
+          "attackPoints": 145
+        },
+        {
+          "seed": 1506,
+          "trumpSuit": "♦",
+          "trumpRank": 14,
+          "dealer": 1,
+          "initialLeader": 1,
+          "decisions": 80,
+          "attackPoints": 55
+        },
+        {
+          "seed": 1507,
+          "trumpSuit": null,
+          "trumpRank": 3,
+          "dealer": 2,
+          "initialLeader": 2,
+          "decisions": 84,
+          "attackPoints": 145
+        },
+        {
+          "seed": 1508,
+          "trumpSuit": "♠",
+          "trumpRank": 9,
+          "dealer": 3,
+          "initialLeader": 3,
+          "decisions": 72,
+          "attackPoints": 80
+        },
+        {
+          "seed": 1509,
+          "trumpSuit": "♥",
+          "trumpRank": 12,
+          "dealer": 0,
+          "initialLeader": 0,
+          "decisions": 84,
+          "attackPoints": 80
+        },
+        {
+          "seed": 1510,
+          "trumpSuit": "♣",
+          "trumpRank": 13,
+          "dealer": 1,
+          "initialLeader": 1,
+          "decisions": 76,
+          "attackPoints": 65
+        }
+      ],
+      "recordSHA256": "331d2a170cb7df251c7ce527ea1bc71206c963d435208d07e016bf0d69396dae",
+      "engineSHA256": null
+    },
+    {
+      "id": "seeds-1511-1520-verified",
+      "label": "第二批10局，上一轮策略修复后的验收记录",
+      "file": "seeds-1511-1520-verified.json",
+      "seeds": [
+        1511,
+        1512,
+        1513,
+        1514,
+        1515,
+        1516,
+        1517,
+        1518,
+        1519,
+        1520
+      ],
+      "configurations": [
+        {
+          "seed": 1511,
+          "trumpSuit": "♦",
+          "trumpRank": 5,
+          "dealer": 0,
+          "initialLeader": 0,
+          "decisions": 60,
+          "attackPoints": 145
+        },
+        {
+          "seed": 1512,
+          "trumpSuit": null,
+          "trumpRank": 5,
+          "dealer": 1,
+          "initialLeader": 1,
+          "decisions": 64,
+          "attackPoints": 130
+        },
+        {
+          "seed": 1513,
+          "trumpSuit": "♠",
+          "trumpRank": 2,
+          "dealer": 2,
+          "initialLeader": 2,
+          "decisions": 88,
+          "attackPoints": 160
+        },
+        {
+          "seed": 1514,
+          "trumpSuit": "♥",
+          "trumpRank": 7,
+          "dealer": 3,
+          "initialLeader": 3,
+          "decisions": 80,
+          "attackPoints": 150
+        },
+        {
+          "seed": 1515,
+          "trumpSuit": "♣",
+          "trumpRank": 10,
+          "dealer": 0,
+          "initialLeader": 0,
+          "decisions": 72,
+          "attackPoints": 45
+        },
+        {
+          "seed": 1516,
+          "trumpSuit": "♦",
+          "trumpRank": 14,
+          "dealer": 1,
+          "initialLeader": 1,
+          "decisions": 80,
+          "attackPoints": 95
+        },
+        {
+          "seed": 1517,
+          "trumpSuit": null,
+          "trumpRank": 3,
+          "dealer": 2,
+          "initialLeader": 2,
+          "decisions": 72,
+          "attackPoints": 105
+        },
+        {
+          "seed": 1518,
+          "trumpSuit": "♠",
+          "trumpRank": 9,
+          "dealer": 3,
+          "initialLeader": 3,
+          "decisions": 84,
+          "attackPoints": 150
+        },
+        {
+          "seed": 1519,
+          "trumpSuit": "♥",
+          "trumpRank": 12,
+          "dealer": 0,
+          "initialLeader": 0,
+          "decisions": 72,
+          "attackPoints": 100
+        },
+        {
+          "seed": 1520,
+          "trumpSuit": "♣",
+          "trumpRank": 13,
+          "dealer": 1,
+          "initialLeader": 1,
+          "decisions": 56,
+          "attackPoints": 125
+        }
+      ],
+      "recordSHA256": "eef6ac06933844e50c01194d26a2a763a6c455e475828dc76d17e016ade0b5db",
+      "engineSHA256": null
+    },
+    {
+      "id": "seeds-1521-1530-review",
+      "label": "第三批全新10局复核，沿用上一轮已修复策略",
+      "file": "seeds-1521-1530-review.json",
+      "seeds": [
+        1521,
+        1522,
+        1523,
+        1524,
+        1525,
+        1526,
+        1527,
+        1528,
+        1529,
+        1530
+      ],
+      "configurations": [
+        {
+          "seed": 1521,
+          "trumpSuit": "♦",
+          "trumpRank": 5,
+          "dealer": 0,
+          "initialLeader": 0,
+          "decisions": 76,
+          "attackPoints": 90
+        },
+        {
+          "seed": 1522,
+          "trumpSuit": null,
+          "trumpRank": 5,
+          "dealer": 1,
+          "initialLeader": 1,
+          "decisions": 76,
+          "attackPoints": 115
+        },
+        {
+          "seed": 1523,
+          "trumpSuit": "♠",
+          "trumpRank": 2,
+          "dealer": 2,
+          "initialLeader": 2,
+          "decisions": 68,
+          "attackPoints": 110
+        },
+        {
+          "seed": 1524,
+          "trumpSuit": "♥",
+          "trumpRank": 7,
+          "dealer": 3,
+          "initialLeader": 3,
+          "decisions": 84,
+          "attackPoints": 60
+        },
+        {
+          "seed": 1525,
+          "trumpSuit": "♣",
+          "trumpRank": 10,
+          "dealer": 0,
+          "initialLeader": 0,
+          "decisions": 76,
+          "attackPoints": 120
+        },
+        {
+          "seed": 1526,
+          "trumpSuit": "♦",
+          "trumpRank": 14,
+          "dealer": 1,
+          "initialLeader": 1,
+          "decisions": 64,
+          "attackPoints": 35
+        },
+        {
+          "seed": 1527,
+          "trumpSuit": null,
+          "trumpRank": 3,
+          "dealer": 2,
+          "initialLeader": 2,
+          "decisions": 76,
+          "attackPoints": 135
+        },
+        {
+          "seed": 1528,
+          "trumpSuit": "♠",
+          "trumpRank": 9,
+          "dealer": 3,
+          "initialLeader": 3,
+          "decisions": 72,
+          "attackPoints": 135
+        },
+        {
+          "seed": 1529,
+          "trumpSuit": "♥",
+          "trumpRank": 12,
+          "dealer": 0,
+          "initialLeader": 0,
+          "decisions": 76,
+          "attackPoints": 105
+        },
+        {
+          "seed": 1530,
+          "trumpSuit": "♣",
+          "trumpRank": 13,
+          "dealer": 1,
+          "initialLeader": 1,
+          "decisions": 76,
+          "attackPoints": 110
+        }
+      ],
+      "recordSHA256": "77dd41b0e48ce69344385ba99bd707cad04bd78400ff0bc7c532d894b64dfbd0",
+      "engineSHA256": "8e9ad62ba971ef2323876a7dcd0e6cc3698b50abdf8d5f375c87470642276386"
+    },
+    {
+      "id": "seeds-1521-1530-verified",
+      "label": "补齐拔主保护计划过滤后的10局验收；保留修复前批次供对照",
+      "file": "seeds-1521-1530-verified.json",
+      "seeds": [
+        1521,
+        1522,
+        1523,
+        1524,
+        1525,
+        1526,
+        1527,
+        1528,
+        1529,
+        1530
+      ],
+      "configurations": [
+        {
+          "seed": 1521,
+          "trumpSuit": "♦",
+          "trumpRank": 5,
+          "dealer": 0,
+          "initialLeader": 0,
+          "decisions": 76,
+          "attackPoints": 90
+        },
+        {
+          "seed": 1522,
+          "trumpSuit": null,
+          "trumpRank": 5,
+          "dealer": 1,
+          "initialLeader": 1,
+          "decisions": 76,
+          "attackPoints": 115
+        },
+        {
+          "seed": 1523,
+          "trumpSuit": "♠",
+          "trumpRank": 2,
+          "dealer": 2,
+          "initialLeader": 2,
+          "decisions": 68,
+          "attackPoints": 110
+        },
+        {
+          "seed": 1524,
+          "trumpSuit": "♥",
+          "trumpRank": 7,
+          "dealer": 3,
+          "initialLeader": 3,
+          "decisions": 84,
+          "attackPoints": 60
+        },
+        {
+          "seed": 1525,
+          "trumpSuit": "♣",
+          "trumpRank": 10,
+          "dealer": 0,
+          "initialLeader": 0,
+          "decisions": 76,
+          "attackPoints": 120
+        },
+        {
+          "seed": 1526,
+          "trumpSuit": "♦",
+          "trumpRank": 14,
+          "dealer": 1,
+          "initialLeader": 1,
+          "decisions": 64,
+          "attackPoints": 60
+        },
+        {
+          "seed": 1527,
+          "trumpSuit": null,
+          "trumpRank": 3,
+          "dealer": 2,
+          "initialLeader": 2,
+          "decisions": 76,
+          "attackPoints": 135
+        },
+        {
+          "seed": 1528,
+          "trumpSuit": "♠",
+          "trumpRank": 9,
+          "dealer": 3,
+          "initialLeader": 3,
+          "decisions": 72,
+          "attackPoints": 135
+        },
+        {
+          "seed": 1529,
+          "trumpSuit": "♥",
+          "trumpRank": 12,
+          "dealer": 0,
+          "initialLeader": 0,
+          "decisions": 76,
+          "attackPoints": 105
+        },
+        {
+          "seed": 1530,
+          "trumpSuit": "♣",
+          "trumpRank": 13,
+          "dealer": 1,
+          "initialLeader": 1,
+          "decisions": 76,
+          "attackPoints": 110
+        }
+      ],
+      "recordSHA256": "4343740a2ef7ed9f84da9ef104ad07de189fbd0c04a010a60885b25c883727ce",
+      "engineSHA256": "897908312678a6f94b5db17697385c4e3a1d90a2d053c1261b7a1860a5fc79ba"
+    }
+  ]
+}

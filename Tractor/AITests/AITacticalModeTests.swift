@@ -305,6 +305,24 @@ final class SlamFailureTests: XCTestCase {
 
 final class GameTurnOwnershipTests: XCTestCase {
     @MainActor
+    func testOpeningLeadRejectsMixedLogicalSuitsWithoutRemovingCards() {
+        let engine = GameEngine()
+        let state = engine.state
+        state.phase = .playing
+        state.trumpSuit = .spades
+        state.trumpRank = .two
+        state.currentLeader = .south
+        state.currentTurn = .south
+        state.currentTrick = Trick(leadPosition: .south)
+        let cards = [Card(suit: .hearts, rank: .three), Card(suit: .clubs, rank: .four)]
+        state.player(.south).hand = cards
+        engine.humanPlay(position: .south, selectedIDs: Set(cards.map(\.id)))
+        XCTAssertTrue(state.currentTrick.plays.isEmpty)
+        XCTAssertEqual(state.player(.south).hand.count, 2)
+        XCTAssertEqual(state.currentTurn, .south)
+    }
+
+    @MainActor
     func testHumanOpeningPlaySurvivesRepeatedKittyConfirmation() {
         let previousSoundSetting = UserDefaults.standard.object(forKey: "soundEnabled")
         UserDefaults.standard.set(false, forKey: "soundEnabled")
@@ -1235,7 +1253,7 @@ final class AITacticalModeTests: XCTestCase {
         }
     }
 
-    func testKnownVoidOpponentBehindUsesTrumpAceInsteadOfPointTrumpWhenTeammateStillActs() {
+    func testKnownVoidOpponentBehindAllowsCheapPointTrumpContest() {
         let s = makeState()
         s.completedTricks = [playerVoidHeartsTrick(.north)]
         setTrick(s, lead: .south,
@@ -1246,11 +1264,11 @@ final class AITacticalModeTests: XCTestCase {
                  c(nil, .smallJoker), c(.diamonds, .three)])
 
         let chosen = AIPlayer.chooseCards(position: .west, state: s, evaluator: eval)
-        XCTAssertEqual(chosen.map(\.shortDisplay), ["♠A"],
-                       "后面还有队友且对手已知绝门时，应用最小可赢主A/级牌，chosen=\(chosen.map(\.shortDisplay))")
+        XCTAssertEqual(chosen.map(\.shortDisplay), ["♠10"],
+                       "应按收益与成本选择争墩主牌，不强制主A/级牌")
     }
 
-    func testKnownVoidOpponentBehindUsesLevelCardWhenTeamHasNoLaterActor() {
+    func testKnownVoidOpponentBehindUsesBigJokerToSecurePoints() {
         let s = makeState()
         s.completedTricks = [playerVoidHeartsTrick(.east)]
         setTrick(s, lead: .south,
@@ -1264,11 +1282,11 @@ final class AITacticalModeTests: XCTestCase {
                  c(nil, .bigJoker), c(.diamonds, .three)])
 
         let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
-        XCTAssertEqual(chosen.map(\.shortDisplay), ["♣2"],
-                       "本队已无后手且对手已知绝门时，应用级牌管分，chosen=\(chosen.map(\.shortDisplay))")
+        XCTAssertEqual(chosen.first?.rank, .bigJoker,
+                       "本队无后手时，应允许大王锁定分墩")
     }
 
-    func testKnownVoidOpponentBehindDiscardsZeroPointWhenTeammateStillActsAndTrumpsAreWeak() {
+    func testKnownVoidOpponentBehindAllowsPointTrumpToContestPoints() {
         let s = makeState()
         s.completedTricks = [playerVoidHeartsTrick(.north)]
         setTrick(s, lead: .south,
@@ -1277,11 +1295,11 @@ final class AITacticalModeTests: XCTestCase {
         setHand(s, .west, [c(.spades, .ten), c(.spades, .five), c(.diamonds, .three)])
 
         let chosen = AIPlayer.chooseCards(position: .west, state: s, evaluator: eval)
-        XCTAssertEqual(chosen.map(\.shortDisplay), ["♦3"],
-                       "后面还有队友且只有弱主/主分时应垫0分副牌，chosen=\(chosen.map(\.shortDisplay))")
+        XCTAssertEqual(chosen.map(\.shortDisplay), ["♠10"],
+                       "不能因主牌带分就硬性禁止争墩")
     }
 
-    func testKnownVoidOpponentBehindDoesNotSpendJokersWhenTeamHasNoLaterActor() {
+    func testKnownVoidOpponentBehindDoesSpendBigJokerToSecureFifteenPoints() {
         let s = makeState()
         s.completedTricks = [playerVoidHeartsTrick(.east)]
         setTrick(s, lead: .south,
@@ -1295,8 +1313,8 @@ final class AITacticalModeTests: XCTestCase {
                  c(.spades, .ten), c(.diamonds, .three)])
 
         let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: eval)
-        XCTAssertEqual(chosen.map(\.shortDisplay), ["♦3"],
-                       "本队已无后手时也不应动大小王作无效竞争，chosen=\(chosen.map(\.shortDisplay))")
+        XCTAssertEqual(chosen.first?.rank, .bigJoker,
+                       "大王能锁定15分时应允许使用")
     }
 
     // 开局主牌很多也不应直接领对王；拔主应先用低成本小主，保留最高控制对。

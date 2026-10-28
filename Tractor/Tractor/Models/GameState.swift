@@ -151,6 +151,36 @@ class GameState: ObservableObject {
     // ── 计算属性 ──────────────────────────────
     var humanPlayer: Player { players[PlayerPosition.south.rawValue] }
     func player(_ pos: PlayerPosition) -> Player { players[pos.rawValue] }
+
+    /// 决策观察中，其他玩家只暴露张数，不包含其真实牌面。
+    private var observedHandCounts: [PlayerPosition: Int]? = nil
+
+    func handCount(for position: PlayerPosition) -> Int {
+        observedHandCounts?[position] ?? player(position).hand.count
+    }
+
+    func aiObservation(for position: PlayerPosition) -> GameState {
+        let observation = GameState()
+        observation.phase = phase
+        observation.trumpSuit = trumpSuit
+        observation.trumpRank = trumpRank
+        observation.trumpDeclaration = trumpDeclaration
+        observation.dealerPosition = dealerPosition
+        observation.dealerTeamIdx = dealerTeamIdx
+        observation.teamLevels = teamLevels
+        observation.currentTurn = currentTurn
+        observation.currentLeader = currentLeader
+        observation.currentTrick = currentTrick
+        observation.completedTricks = completedTricks
+        observation.declarationEvents = declarationEvents
+        observation.attackScore = attackScore
+        observation.roundNumber = roundNumber
+        observation.observedHandCounts = Dictionary(uniqueKeysWithValues:
+            PlayerPosition.allCases.map { ($0, handCount(for: $0)) })
+        observation.player(position).hand = player(position).hand
+        observation.kitty = position == dealerPosition ? kitty : []
+        return observation
+    }
     func teamLevel(_ team: Int) -> Rank { teamLevels[team] ?? .two }
     var currentDealerTeamLevel: Rank { teamLevel(dealerTeamIdx) }
     var attackTeamIdx: Int { 1 - dealerTeamIdx }
