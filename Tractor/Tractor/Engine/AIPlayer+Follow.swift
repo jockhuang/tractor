@@ -43,9 +43,13 @@ extension AIPlayer {
         let legal = deduplicatedMoves(candidates).filter {
             evaluator.isValidPlay(selected: $0.cards, hand: hand, leadCards: leadCards)
         }
+        let noWasteLegal = filterUnwinnableSideSuitTrumpFills(
+            legal, leadCards: leadCards, hand: hand,
+            position: position, state: state, evaluator: evaluator
+        )
 
         let exposureFilteredLegal = filterUnsafeTrumpPointExposureBeforeUnknownOpponent(
-            legal,
+            noWasteLegal,
             leadCards: leadCards,
             hand: hand,
             position: position,
@@ -1311,6 +1315,10 @@ extension AIPlayer {
             return moves
         }
 
+        // 副牌组合未跟满时，必须带上本门剩牌；整组不可能全是主牌，
+        // 因而无法将吃。这里不是主牌控墩候选，交给普通补牌路径处理。
+        if leadSuit != nil && !suitCards.isEmpty { return [] }
+
         let usedIDs = Set(suitCards.map(\.id))
         let extra = hand.filter { !usedIDs.contains($0.id) }
         let trumpPool = extra
@@ -1366,6 +1374,38 @@ extension AIPlayer {
         }
 
         return moves
+    }
+
+
+    /// 跟副牌组合时只剩部分本门牌，补出的主牌无法把整组变成将吃。
+    /// 若有不多送分的合法替代，保留王、级牌和主 A 等控制牌。
+    static func filterUnwinnableSideSuitTrumpFills(
+        _ moves: [AIMove],
+        leadCards: [Card],
+        hand: [Card],
+        position: PlayerPosition,
+        state: GameState,
+        evaluator: TrickEvaluator
+    ) -> [AIMove] {
+        let leadSuit = evaluator.dominantSuit(of: leadCards)
+        guard leadCards.count > 1, leadSuit != nil else { return moves }
+        let suitedCount = hand.filter { evaluator.cardSuit($0) == leadSuit }.count
+        guard suitedCount > 0, suitedCount < leadCards.count else { return moves }
+
+        let ts = state.trumpSuit
+        let tr = state.trumpRank
+        let alternatives = moves.filter { !containsBigTrump($0.cards, ts: ts, tr: tr) }
+        guard !alternatives.isEmpty else { return moves }
+
+        return moves.filter { move in
+            guard containsBigTrump(move.cards, ts: ts, tr: tr),
+                  !candidateWinsTrick(move.cards, position: position, state: state, evaluator: evaluator)
+            else { return true }
+            let points = move.cards.reduce(0) { $0 + $1.pointValue }
+            return !alternatives.contains {
+                $0.cards.reduce(0) { $0 + $1.pointValue } <= points
+            }
+        }
     }
 
 

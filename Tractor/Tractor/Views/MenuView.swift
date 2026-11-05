@@ -552,6 +552,7 @@ struct RulesView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     ruleSection(title: L10n.text("基本规则"), content: L10n.text("rules.basic.body"))
                     ruleSection(title: L10n.text("主牌体系"), content: L10n.text("rules.trump.body"))
+                    ruleSection(title: L10n.text("亮主与反主"), content: L10n.text("rules.declaration.body"))
                     ruleSection(title: L10n.text("出牌"), content: L10n.text("rules.play.body"))
                     ruleSection(title: L10n.text("计分"), content: L10n.text("rules.scoring.body"))
                     ruleSection(title: L10n.text("升级"), content: L10n.text("rules.level.body"))

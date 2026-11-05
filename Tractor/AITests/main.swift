@@ -1015,6 +1015,64 @@ do {
     )
 }
 
+// ── IMG6581 相容变体：只剩一张先手花色时跟甩牌不能白垫小王 ──
+do {
+    // 截图未显示北家余牌；构造与截图相容的手牌。西甩 Q♠ J♠ 10♠，
+    // 北只剩一张黑桃。即使补小王也不是全主牌，不能将吃。
+    let s = makeState(trump: .diamonds, rank: .nine)
+    s.attackScore = 40
+    let lead = [c(.spades, .queen), c(.spades, .jack), c(.spades, .ten)]
+    let hand = [
+        c(.spades, .ten), c(nil, .smallJoker), c(.clubs, .seven),
+        c(.hearts, .ace), c(.hearts, .ace),
+        c(.hearts, .king), c(.hearts, .king),
+        c(.clubs, .king), c(.clubs, .king), c(.diamonds, .four)
+    ]
+    setTrick(s, lead: .west, plays: [(.west, lead)], turn: .north)
+    var unseen = Deck.doubleDeck()
+    for card in lead + hand {
+        if let index = unseen.firstIndex(where: { $0.suit == card.suit && $0.rank == card.rank }) {
+            unseen.remove(at: index)
+        }
+    }
+    s.player(.west).hand = Array(unseen[0..<7])
+    s.player(.north).hand = hand
+    s.player(.east).hand = Array(unseen[7..<17])
+    s.player(.south).hand = Array(unseen[17..<27])
+    let evaluator = TrickEvaluator(trumpSuit: .diamonds, trumpRank: .nine)
+    let ctx = AIContext.build(state: s, ts: .diamonds, tr: .nine)
+    let mislabeledTrumpMoves = AIPlayer.generateTrumpControlCandidates(
+        leadCards: lead, hand: hand, position: .north,
+        state: s, evaluator: evaluator, ctx: ctx
+    )
+    check(mislabeledTrumpMoves.isEmpty,
+          "IMG6581 被迫跟一张黑桃后不能生成主牌控墩候选")
+
+    let jokerFill = AIPlayer.AIMove(cards: [hand[0], hand[1], hand[2]], kind: .followWin)
+    let sideFill = AIPlayer.AIMove(cards: [hand[0], hand[2], hand[3]], kind: .followDiscard)
+    let filtered = AIPlayer.filterUnwinnableSideSuitTrumpFills(
+        [jokerFill, sideFill], leadCards: lead, hand: hand,
+        position: .north, state: s, evaluator: evaluator
+    )
+    check(evaluator.isValidPlay(selected: jokerFill.cards, hand: hand, leadCards: lead)
+          && winnerAfter(s, position: .north, cards: jokerFill.cards, evaluator: evaluator) == .west
+          && filtered.count == 1 && filtered[0].cards.map(\.id) == sideFill.cards.map(\.id),
+          "IMG6581 同分替代存在时，过滤无法赢墩的小王补牌")
+    let costlySideFill = AIPlayer.AIMove(cards: [hand[0], hand[2], hand[5]], kind: .followDiscard)
+    let pointTradeoff = AIPlayer.filterUnwinnableSideSuitTrumpFills(
+        [jokerFill, costlySideFill], leadCards: lead, hand: hand,
+        position: .north, state: s, evaluator: evaluator
+    )
+    check(pointTradeoff.count == 2,
+          "IMG6581 非主替代会额外送 10 分时，仍保留主牌作为分差权衡")
+
+    let chosen = AIPlayer.chooseCards(position: .north, state: s, evaluator: evaluator)
+    check(chosen.count == 3 && chosen.contains(where: { $0.suit == .spades })
+          && !chosen.contains(where: { $0.rank == .smallJoker }),
+          "IMG6581 有一张黑桃须跟时，不能白垫小王",
+          "chosen=\(chosen.map(\.shortDisplay))")
+}
+
 // ── Test 15：残局保留最后一手主牌控制，争取有分底牌 ──
 do {
     func trumpExhaustionEvidence() -> Trick {

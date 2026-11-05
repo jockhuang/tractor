@@ -68,15 +68,17 @@
 /* Rules */
 "基本规则" = "Basics";
 "主牌体系" = "Trump Cards";
+"亮主与反主" = "Declaring Trump";
 "出牌" = "Playing Cards";
 "计分" = "Scoring";
 "升级" = "Ranking Up";
 "完成" = "Done";
-"rules.basic.body" = "• Four players: North–South vs East–West\n• Two full decks (108 cards), including jokers\n• The dealer team owns the current level, advancing from 2 to A";
-"rules.trump.body" = "• The dealer team declares the trump suit\n• Trump order: Big Joker > Small Joker > level card in the trump suit > level cards in other suits > other cards in the trump suit\n• Every level card is trump, regardless of suit";
-"rules.play.body" = "• The leader may play a single, pair, or tractor (consecutive pairs)\n• Followers must follow suit and may discard from another suit only when short\n• Side-suit cards cannot beat trump; trump can beat any side-suit card";
-"rules.scoring.body" = "• 5 is worth 5 points; 10 and K are worth 10 points\n• The attacking team wins the round with 80 or more points\n• The final-trick winner takes the kitty points with a multiplier";
-"rules.level.body" = "• If the dealer team wins, it advances 1–3 levels based on the attackers’ score\n• If the attacking team wins, it becomes the next dealer team\n• 120 points advances 1 level; 160 points advances 2\n• Reaching A starts the A round; win with an advance while already on A to win the game";
+"rules.basic.body" = "• Four players: North–South vs East–West\n• Two full decks (108 cards), including jokers\n• Each team has its own level, starting at 2; the dealer team's level sets this round's level card";
+"rules.trump.body" = "• Trump includes both jokers, every suit's level cards, and all other cards of the trump suit\n• Highest to lowest: Big Joker > Small Joker > level card of the trump suit > level cards of other suits > ordinary cards of the trump suit\n• Ordinary trump-suit cards rank by face value, skipping the current level. For example, at level 5 with hearts as trump, ♥5 outranks other 5s, while ♥A is ordinary trump\n• In No Trump, only jokers and level cards are trump; there is no trump suit";
+"rules.declaration.body" = "• Any of the four players may declare trump while cards are being dealt, not just the dealer\n• One level card declares its suit; a matching pair of level cards can declare or overcall; a pair of Small Jokers or a pair of Big Jokers can declare No Trump\n• An overcall must be stronger: single level card < level-card pair < joker pair for No Trump; No Trump cannot be overcalled\n• In the first round, the final declarer becomes dealer. From the second round on, the previous result fixes the dealer; declarations only set trump\n• If nobody declares by the end of the deal, the designated dealer must declare";
+"rules.play.body" = "• The leader may play a single, pair, or tractor (consecutive pairs), or throw several cards of one logical suit together (such as singles or a pair plus a single)\n• Each single, pair, or tractor in a throw must be unbeatable by a higher component of the same type in any other player's hand. If the throw fails, each failed card costs 10 points; one failed component is led and the rest return to the hand\n• Followers must play as many cards of the led logical suit as they can; all trump counts as one suit\n• When the required card count and pattern are met, trump can beat side-suit cards; side-suit cards cannot beat trump";
+"rules.scoring.body" = "• 5 is worth 5 points; 10 and K are worth 10 points\n• The attacking team wins the round with 80 or more points\n• If the attackers win the final trick, kitty points are multiplied according to the opening play of that trick and added to their total; if the dealer team wins, the kitty is defended";
+"rules.level.body" = "• Attackers score 0: dealer team advances 3 levels; 1–39: dealer team advances 2; 40–79: dealer team advances 1\n• Attackers score 80–119: they win the round and deal next, but advance 0 levels; 120–159: advance 1; 160–199: advance 2; each further 40 points adds 1 level\n• After the dealer team defends, the current dealer's partner deals next. If the attackers win, the next clockwise player from the current dealer deals\n• Reaching A starts an A-level round. A team wins the game only by earning at least one further level while already on A";
 
 /* Seats, cards, and common labels */
 "player.me" = "Me";
